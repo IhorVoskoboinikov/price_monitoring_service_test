@@ -329,7 +329,7 @@ def check_price_alerts_task():
 # ✅ Правильно — репозиторий и сервис async
 class PriceService:
     async def get_current_prices(self, product_id: UUID, currency: str) -> list[PriceItem]:
-        rows = await self.price_repo.get_latest_prices(product_id)   # async запрос к БД
+        rows = await self.price_repo.get_current_prices(product_id)   # async запрос к БД
         # convert учитывает направление курса и дату (см. CurrencyService)
         return [
             PriceItem(price=await self.currency_service.convert(row.price_usd, currency))
@@ -549,7 +549,7 @@ def determine_trend(avg_today: Decimal, avg_30d: Decimal) -> str:
 
 | Метод | Описание |
 |---|---|
-| `fetch_all_shops()` | Celery Beat, интервал из `.env` (по умолчанию 4 часа). Запускает `fetch_shop()` для каждого активного магазина |
+| `fetch_all()` | Celery Beat, интервал из `.env` (по умолчанию 4 часа). Запускает `fetch_shop()` для каждого активного магазина |
 | `fetch_shop(shop_id)` | Через адаптер получает товары, записывает `PriceHistory` |
 | `save_price(product_shop_id, price_usd)` | Сохраняет снимок цены. Избегает дублей за < 1 час |
 
@@ -560,7 +560,7 @@ def determine_trend(avg_today: Decimal, avg_30d: Decimal) -> str:
 **Шаг 1 — Реализовать адаптер**
 
 ```python
-# app/shop_adapters/newshop.py
+# app/services/shop_adapters/newshop.py
 class NewShopAdapter(BaseShopAdapter):
     async def fetch_products(self) -> list[ShopProduct]:
         async with httpx.AsyncClient() as client:
@@ -582,7 +582,7 @@ class NewShopAdapter(BaseShopAdapter):
 **Шаг 2 — Зарегистрировать в реестре**
 
 ```python
-# app/shop_adapters/registry.py
+# app/services/shop_adapters/registry.py
 ADAPTERS: dict[str, type[BaseShopAdapter]] = {
     'dummyjson': DummyJsonAdapter,
     'fakestore': FakeStoreAdapter,
@@ -597,7 +597,7 @@ INSERT INTO shop (name, base_url, adapter_key, is_active)
 VALUES ('NewShop', 'https://newshop.com/api', 'newshop', true);
 ```
 
-Это делается через Alembic data-migration или seed-скрипт. Перезапуск приложения не требуется — `fetch_all_shops()` читает список магазинов из БД при каждом запуске задачи.
+Это делается через Alembic data-migration или seed-скрипт. Перезапуск приложения не требуется — `fetch_all()` читает список магазинов из БД при каждом запуске задачи.
 
 **Шаг 4 — Связать товары нового магазина с существующими (`ProductShop`)**
 
@@ -661,51 +661,46 @@ async def seed_products(db: AsyncSession) -> None:
 
 ### 5.8 Lifespan — автоматический запуск seed
 
-Вместо ручного запуска seed-скрипта используется FastAPI `lifespan` — функция, которая выполняется автоматически при старте приложения. Seed запускается только если база пустая (первый запуск), при повторных стартах пропускается.
+Seed запускается автоматически через FastAPI `lifespan` при старте `api`. Каждый
+шаг проверяется независимо (магазины/товары есть → пропускаем), курсы
+синхронизируются всегда (идемпотентный upsert на сегодня). Сама оркестрация —
+`run_seed_if_needed()` в `app/tasks/seed.py` (рядом с `seed_shops`/`seed_products`),
+а `main.py` остаётся тонким — только сборка приложения.
 
 ```python
-# app/main.py
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from sqlalchemy import func, select
-from app.db.models import Shop
-from app.db.session import get_session
-from app.tasks.seed import seed_shops, seed_products
-from app.core.config import settings
-import logging
-
-logger = logging.getLogger(__name__)
-
+# app/main.py — тонкая сборка
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── STARTUP ──────────────────────────────────────────────
-    if settings.run_seed_on_startup:
-        await run_seed_if_needed()
+    if settings.run_seed_on_startup:        # true только в контейнере api
+        await run_seed_if_needed()          # из app/tasks/seed.py
     yield
-    # ── SHUTDOWN ─────────────────────────────────────────────
-    # закрытие пула соединений, если нужно
+    await db_service.dispose()              # закрыть пул при остановке
 
-async def run_seed_if_needed() -> None:
-    async with get_session() as db:
-        result = await db.execute(select(func.count(Shop.id)))
-        shops_count = result.scalar()
+def create_app() -> FastAPI:
+    app = FastAPI(title="Price Tracker API", lifespan=lifespan)
+    register_exception_handlers(app)        # доменные исключения → HTTP
+    app.include_router(api_router)
+    return app
 
-        if shops_count == 0:
-            # База пустая — первый запуск
-            logger.info("First run detected, seeding database...")
-            await seed_shops(db)
-            await seed_products(db)
-            logger.info("Seed completed successfully.")
-        else:
-            logger.info("Database already seeded, skipping.")
-
-        # Курсы синхронизируются всегда (идемпотентно), не только при первом запуске
-        await sync_today_rates(db)
-
-app = FastAPI(lifespan=lifespan)
+app = create_app()
 ```
 
-> **Почему проверяем `Shop.count == 0`:** если магазины уже есть — значит seed уже запускался. Это простой и надёжный флаг без лишней таблицы.
+```python
+# app/tasks/seed.py — оркестрация (упрощённо)
+async def run_seed_if_needed() -> None:
+    async with db_service.session() as db:
+        await seed_demo_user(db)
+        shops = (await db.execute(select(Shop))).scalars().all()
+        shop_ids = {s.adapter_key: s.id for s in shops} or await seed_shops(db)
+        if not await db.scalar(select(func.count(Product.id))):
+            await seed_products(db, shop_ids)               # сетевые сбои не валят старт
+        await CurrencyService(ExchangeRateRepo(db), redis_client).sync_today_rates()
+        await db.commit()
+```
+
+> **Почему проверяем наличие магазинов/товаров:** если они есть — seed уже
+> запускался. Простой и надёжный флаг без лишней таблицы. Сбои внешних API при
+> seed (магазины/НБУ) логируются, но не роняют приложение (graceful degradation).
 
 > **`run_seed_on_startup` из `.env`:** seed должен запускаться только в контейнере `api`, не в `worker` и `beat` — они тоже используют FastAPI контекст косвенно. Флаг управляется через переменную окружения (см. docker-compose ниже).
 
@@ -988,56 +983,65 @@ price_eur = price_usd * rate_usd / rate_eur
 price_tracker/
 ├── app/
 │   ├── api/
-│   │   ├── v1/
-│   │   │   ├── products.py        # GET /products, /products/{id}
-│   │   │   ├── prices.py          # GET /products/{id}/prices, /price-history
-│   │   │   ├── user_products.py   # POST/DELETE /me/products
-│   │   │   ├── alerts.py          # CRUD /me/alerts
-│   │   │   └── currencies.py      # GET /currencies
-│   │   └── deps.py                # DI: get_db, get_current_user
+│   │   ├── __init__.py            # сборка api_router из v1-роутеров
+│   │   ├── deps.py                # DI: сессия БД, провайдеры сервисов, auth
+│   │   ├── errors.py              # register_exception_handlers (доменные → HTTP)
+│   │   └── v1/
+│   │       ├── products.py        # /products, /{id}, /{id}/prices, /{id}/price-history
+│   │       ├── user_products.py   # GET/POST/DELETE /me/products (watchlist)
+│   │       ├── alerts.py          # CRUD /me/alerts
+│   │       ├── currencies.py      # GET /currencies
+│   │       └── health.py          # GET /health
 │   ├── core/
 │   │   ├── config.py              # Settings (pydantic-settings)
-│   │   ├── security.py            # JWT verify
+│   │   ├── security.py            # JWT verify → TokenPayload
+│   │   ├── exceptions.py          # доменные исключения (AppError/NotFound/Conflict)
+│   │   ├── http_retry.py          # get_with_retry: ретраи к внешним API
+│   │   ├── email.py               # send_email (SMTP / console-режим)
+│   │   ├── redis.py               # клиент Redis + фабрика для задач
+│   │   ├── logger.py              # настройка логирования
 │   │   └── wait_for_db.py         # ожидание готовности БД перед стартом
 │   ├── db/
-│   │   ├── models.py              # SQLAlchemy ORM models
-│   │   ├── session.py             # async engine + sessionmaker
-│   │   └── repositories/          # CRUD методы (Repository pattern)
-│   │       ├── product_repo.py
-│   │       ├── price_repo.py
-│   │       └── alert_repo.py
+│   │   ├── models/                # SQLAlchemy ORM — по сущности на файл
+│   │   │   ├── base.py            # DeclarativeBase
+│   │   │   ├── user.py  shop.py  product.py  product_shop.py
+│   │   │   ├── price_history.py   # партиционированная (RANGE recorded_at)
+│   │   │   ├── exchange_rate.py  user_product.py  price_alert.py
+│   │   └── repositories/          # Repository pattern (по сущности)
+│   │       ├── base.py            # BaseRepository (flush/refresh)
+│   │       ├── product_repo.py  price_repo.py  alert_repo.py
+│   │       ├── shop_repo.py  exchange_rate_repo.py  user_product_repo.py
+│   │   └── __init__.py
+│   ├── schemas/                   # Pydantic request/response + enums
+│   │   ├── product.py  price.py  alert.py  currency.py
+│   │   ├── enums.py               # Currency/TrendDirection/SortOption (StrEnum)
+│   │   └── auth.py                # TokenPayload
 │   ├── services/
-│   │   ├── price_service.py       # бизнес-логика цен
-│   │   ├── currency_service.py    # конвертация + НБУ
+│   │   ├── price_service.py       # агрегация цен, тренд, история
+│   │   ├── currency_service.py    # конвертация + НБУ + кеш
 │   │   ├── alert_service.py       # алерты
-│   │   └── fetcher_service.py     # сбор цен из магазинов
-│   ├── shop_adapters/
-│   │   ├── base.py                # BaseShopAdapter ABC
-│   │   ├── dummyjson.py           # DummyJsonAdapter
-│   │   ├── fakestore.py           # FakeStoreAdapter
-│   │   └── registry.py            # ADAPTERS dict + get_adapter()
-│   ├── schemas/                   # Pydantic schemas (request/response)
-│   │   ├── product.py
-│   │   ├── price.py
-│   │   └── alert.py
+│   │   ├── user_product_service.py# watchlist
+│   │   ├── price_fetcher.py       # сбор цен из магазинов
+│   │   ├── db_service.py          # engine/session (+ begin_task_session)
+│   │   └── shop_adapters/
+│   │       ├── base.py            # BaseShopAdapter + ShopProduct
+│   │       ├── dummyjson.py  fakestore.py  registry.py
 │   ├── tasks/
-│   │   ├── celery_app.py          # Celery instance + beat_schedule со всеми задачами
-│   │   ├── prices.py              # fetch_prices_task + create_price_history_partition_task
+│   │   ├── celery_app.py          # Celery instance + beat_schedule
+│   │   ├── prices.py              # fetch_prices_task + create_..._partition_task
 │   │   ├── rates.py               # sync_exchange_rates_task
 │   │   ├── alerts.py              # check_price_alerts_task
-│   │   └── seed.py                # seed_shops(), seed_products()
-│   └── main.py                    # FastAPI app factory + lifespan (auto-seed)
-├── alembic/                       # Миграции БД
+│   │   └── seed.py                # seed_*(), run_seed_if_needed()
+│   └── main.py                    # create_app() factory + lifespan
+├── alembic/versions/             # миграции (initial + scaling indexes)
 ├── scripts/
-│   └── generate_token.py          # генерация JWT для тестирования API
-├── tests/
-│   ├── unit/                      # Тесты сервисов и адаптеров
-│   └── integration/               # Тесты API (httpx + pytest)
-├── docker-compose.yml
-├── Dockerfile
-├── .env.example               # шаблон конфига, коммитится в репо
-├── .env                       # реальный конфиг, в .gitignore
-├── pyproject.toml             # зависимости + настройки ruff/mypy/pytest
+│   ├── generate_token.py          # статический JWT для тестирования API
+│   ├── run_check_alerts.py        # ручной прогон проверки алертов
+│   └── sync_historical_rates.py   # разовая догрузка истории курсов
+├── tests/                        # conftest.py + run.py + test_*.py (api/unit)
+├── docker-compose.yml  Dockerfile  .dockerignore
+├── .env.example               # шаблон конфига (коммитится); .env — в .gitignore
+├── pyproject.toml             # зависимости + ruff/mypy/pytest/coverage
 └── uv.lock                    # lock-файл, коммитится в репо
 ```
 
@@ -1065,7 +1069,7 @@ Celery Beat
    │
    └─► fetch_prices_task()
          │
-         └─► PriceFetcherService.fetch_all_shops()
+         └─► PriceFetcherService.fetch_all()
                │
                └─► [для каждого Shop в БД, параллельно через asyncio.gather()]
                      │
@@ -1118,10 +1122,13 @@ class Settings(BaseSettings):
     sync_rates_cron_hour: int = 8         # время UTC для синхронизации курсов
 
     # ── Email ───────────────────────────────────────────────
-    smtp_host: str
+    # email_enabled=false → console-режим (письма логируются). Поэтому SMTP_*
+    # имеют дефолты и не обязательны — проект запускается без реального SMTP.
+    email_enabled: bool = False
+    smtp_host: str = "localhost"
     smtp_port: int = 587
-    smtp_user: str
-    smtp_password: str
+    smtp_user: str = ""
+    smtp_password: str = ""
     smtp_from: str = "noreply@pricetracker.com"
     smtp_use_tls: bool = True
 
@@ -1204,78 +1211,80 @@ SHOP_API_RETRY_ATTEMPTS=3
 
 Авторизация реализована минимально: один статический JWT-токен, который проверяется в каждом запросе. Без регистрации, без логина, без refresh-токенов.
 
+Bearer-токен извлекается через `HTTPBearer`, подпись проверяется (`python-jose`,
+HS256), а полезная нагрузка валидируется в **типизированную** `TokenPayload`
+(см. 5.x и `app/schemas/auth.py`) — `user_id` обязателен.
+
 **app/core/security.py**
 
 ```python
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
-import jwt
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
+from pydantic import ValidationError
+
 from app.core.config import settings
+from app.schemas.auth import TokenPayload
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+_http_bearer = HTTPBearer()
 
-def verify_token(token: str = Depends(oauth2_scheme)) -> dict:
+def verify_token(
+    credentials: HTTPAuthorizationCredentials = Depends(_http_bearer),
+) -> TokenPayload:
     try:
-        payload = jwt.decode(
-            token,
-            settings.app_secret_key,
-            algorithms=["HS256"],
-        )
-        return payload
-    except jwt.InvalidTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raw = jwt.decode(credentials.credentials, settings.app_secret_key,
+                         algorithms=["HS256"])
+    except JWTError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or missing token",
+                            headers={"WWW-Authenticate": "Bearer"})
+    try:
+        return TokenPayload.model_validate(raw)   # user_id обязателен
+    except ValidationError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token payload is invalid",
+                            headers={"WWW-Authenticate": "Bearer"})
 ```
 
 **Генерация токена — один раз при настройке проекта:**
 
 ```python
 # scripts/generate_token.py
-import jwt
+from jose import jwt
 from app.core.config import settings
 
+DEMO_USER_ID = "10000000-0000-0000-0000-000000000001"  # совпадает с seed
 token = jwt.encode(
-    {"sub": "admin", "role": "admin"},
-    settings.app_secret_key,
-    algorithm="HS256",
+    {"sub": "admin", "role": "admin", "user_id": DEMO_USER_ID},
+    settings.app_secret_key, algorithm="HS256",
 )
 print(f"Bearer {token}")
 ```
 
 ```bash
-# Запуск:
 uv run python scripts/generate_token.py
-# Вывод: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+# Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
-Полученный токен вставляется в Swagger UI (кнопка "Authorize") или в заголовок запроса:
-
-```
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
+Токен вставляется в Swagger UI (кнопка "Authorize") или в заголовок
+`Authorization: Bearer <token>`.
 
 **Использование в эндпоинтах через `deps.py`:**
 
 ```python
 # app/api/deps.py
-from app.core.security import verify_token
-
-# Зависимость — добавляется в любой эндпоинт где нужна авторизация
-CurrentUser = Annotated[dict, Depends(verify_token)]
+CurrentUser   = Annotated[TokenPayload, Depends(verify_token)]
+CurrentUserId = Annotated[uuid.UUID, Depends(get_current_user_id)]  # → user.user_id
 ```
 
 ```python
 # app/api/v1/products.py
-@router.get("/products")
+@router.get("", response_model=ProductListResponse)
 async def get_products(
-    user: CurrentUser,          # проверяет токен
-    currency: str = "USD",
-    service: PriceService = Depends(get_price_service),
-):
-    return await service.get_products_list(currency=currency)
+    user_id: CurrentUserId,                 # проверяет токен + даёт user_id
+    service: PriceServiceDep,
+    currency: Currency = Query(Currency.USD),
+    sort: SortOption = Query(SortOption.PRICE_ASC),
+) -> ProductListResponse:
+    return await service.get_products_list(user_id, currency, page, page_size, sort)
 ```
 
 > **Почему без `exp`:** для ТЗ срок действия токена не нужен — токен генерируется один раз и используется для тестирования API. В production добавляется `exp` и refresh-механизм.
@@ -1304,6 +1313,7 @@ dependencies = [
     "httpx>=0.27",
     "bcrypt>=4.0",
     "python-jose[cryptography]>=3.3",
+    "aiosmtplib>=5.1",
 ]
 
 [dependency-groups]
