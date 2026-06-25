@@ -17,6 +17,14 @@ logger = get_logger(__name__)
 # Валюты для синхронизации с НБУ (UAH — опорная, её курс к себе = 1).
 SYNC_CURRENCIES = [Currency.USD, Currency.EUR, Currency.GBP]
 
+# Денежная точность результата конвертации — единообразно 4 знака.
+_MONEY = Decimal("0.0001")
+
+# Ожидаемые сбои при обращении к НБУ: сеть/HTTP, битый JSON, неполный ответ,
+# нечисловой курс. Ловим именно их (graceful degradation), а не любой Exception —
+# чтобы баги кода (AttributeError, NameError и т.п.) не маскировались.
+_NBU_FETCH_ERRORS = (httpx.HTTPError, ValueError, KeyError, TypeError, ArithmeticError)
+
 
 class CurrencyService:
     """Конвертация валют и доступ к курсам НБУ.
@@ -44,16 +52,16 @@ class CurrencyService:
             USD → EUR :  price_usd * rate_usd / rate_eur
         """
         if to_currency == Currency.USD:
-            return amount_usd
+            return amount_usd.quantize(_MONEY)
 
         target_date = for_date or date.today()
         rate_usd = await self.get_rate(Currency.USD, target_date)
 
         if to_currency == Currency.UAH:
-            return (amount_usd * rate_usd).quantize(Decimal("0.0001"))
+            return (amount_usd * rate_usd).quantize(_MONEY)
 
         rate_target = await self.get_rate(to_currency, target_date)
-        return (amount_usd * rate_usd / rate_target).quantize(Decimal("0.0001"))
+        return (amount_usd * rate_usd / rate_target).quantize(_MONEY)
 
     async def get_rate(self, currency: Currency, for_date: date) -> Decimal:
         """Курс (гривен за 1 единицу валюты). Redis → БД → НБУ API.
@@ -154,7 +162,7 @@ class CurrencyService:
                     attempts=settings.shop_api_retry_attempts,
                 )
                 return {r["cc"]: Decimal(str(r["rate"])) for r in resp.json()}
-        except Exception as e:
+        except _NBU_FETCH_ERRORS as e:
             logger.warning(f"NBU bulk fetch failed: {e}")
             return {}
 
@@ -169,7 +177,7 @@ class CurrencyService:
                 data = resp.json()
             if data:
                 return Decimal(str(data[0]["rate"]))
-        except Exception as e:
+        except _NBU_FETCH_ERRORS as e:
             logger.warning(f"NBU API failed for {currency} on {for_date}: {e}")
         return None
 

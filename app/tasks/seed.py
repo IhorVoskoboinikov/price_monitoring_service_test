@@ -1,14 +1,18 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logger import get_logger, log_operation
+from app.core.redis import redis_client
 from app.db.models.product import Product
 from app.db.models.product_shop import ProductShop
 from app.db.models.shop import Shop
 from app.db.models.user import User
+from app.db.repositories.exchange_rate_repo import ExchangeRateRepo
+from app.services.currency_service import CurrencyService
+from app.services.db_service import db_service
 from app.services.shop_adapters.dummyjson import DummyJsonAdapter
 from app.services.shop_adapters.fakestore import FakeStoreAdapter
 
@@ -105,3 +109,45 @@ async def seed_demo_user(db: AsyncSession) -> None:
         ))
         await db.commit()
         logger.info(f"Demo user created | id={DEMO_USER_ID}")
+
+
+async def run_seed_if_needed() -> None:
+    """Идемпотентный стартовый seed: demo-user, магазины, товары, курсы на сегодня.
+
+    Запускается из lifespan только в контейнере api (RUN_SEED_ON_STARTUP=true).
+    Каждый шаг проверяется независимо — устойчивость к частично выполненному seed.
+    Сбои внешних API не валят старт приложения (graceful degradation).
+    """
+    with log_operation(logger, "startup seed"):
+        async with db_service.session() as db:
+            await seed_demo_user(db)
+
+            shops = (await db.execute(select(Shop))).scalars().all()
+            if not shops:
+                logger.info("No shops found — running seed_shops")
+                shop_ids = await seed_shops(db)
+            else:
+                shop_ids = {s.adapter_key: s.id for s in shops}
+                logger.info(f"Shops already exist: {list(shop_ids.keys())}")
+
+            products_count = (
+                await db.execute(select(func.count(Product.id)))
+            ).scalar()
+            if products_count == 0:
+                logger.info("No products found — running seed_products")
+                try:
+                    await seed_products(db, shop_ids)
+                except Exception as e:
+                    logger.warning(f"Could not seed products (API unavailable?): {e}")
+            else:
+                logger.info(f"Products already exist ({products_count}), skipping")
+
+            # Курсы синхронизируем при каждом старте (идемпотентный upsert на сегодня),
+            # чтобы /currencies отдавал актуальное, не дожидаясь beat.
+            try:
+                currency_service = CurrencyService(ExchangeRateRepo(db), redis_client)
+                synced = await currency_service.sync_today_rates()
+                await db.commit()
+                logger.info(f"Synced {synced} exchange rates for today")
+            except Exception as e:
+                logger.warning(f"Could not sync exchange rates (NBU unavailable?): {e}")

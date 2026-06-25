@@ -1,6 +1,5 @@
 from datetime import date
 from decimal import Decimal
-from typing import Optional
 
 from sqlalchemy import CHAR, Date, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -15,6 +14,6 @@ class ExchangeRate(Base):
     currency_code: Mapped[str] = mapped_column(CHAR(3))
     rate_uah_per_unit: Mapped[Decimal] = mapped_column(Numeric(16, 8))
     date: Mapped[date] = mapped_column(Date)
-    source: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, default="NBU")
+    source: Mapped[str | None] = mapped_column(String(50), nullable=True, default="NBU")
 
     __table_args__ = (UniqueConstraint("currency_code", "date"),)

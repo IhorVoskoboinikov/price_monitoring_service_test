@@ -1,10 +1,10 @@
 import asyncio
 
 from app.core.logger import get_logger
-from app.core.redis import redis_client
+from app.core.redis import create_redis_client
 from app.db.repositories.exchange_rate_repo import ExchangeRateRepo
 from app.services.currency_service import CurrencyService
-from app.services.db_service import db_service
+from app.services.db_service import begin_task_session
 from app.tasks.celery_app import app
 
 logger = get_logger(__name__)
@@ -20,8 +20,12 @@ def sync_exchange_rates_task() -> int:
 
 
 async def _sync_today_async() -> int:
-    async with db_service.create_session(readonly=False) as db:
-        service = CurrencyService(ExchangeRateRepo(db), redis_client)
-        synced = await service.sync_today_rates()
-        await db.commit()
-        return synced
+    redis = create_redis_client()
+    try:
+        async with begin_task_session() as db:
+            service = CurrencyService(ExchangeRateRepo(db), redis)
+            synced = await service.sync_today_rates()
+            await db.commit()
+            return synced
+    finally:
+        await redis.aclose()

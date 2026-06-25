@@ -2,9 +2,8 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from fastapi import HTTPException
-
 from app.core.email import send_email
+from app.core.exceptions import NotFoundError
 from app.core.logger import get_logger
 from app.db.models.price_alert import PriceAlert
 from app.db.repositories.alert_repo import AlertRepo
@@ -35,7 +34,7 @@ class AlertService:
         self, user_id: uuid.UUID, data: AlertCreate
     ) -> AlertResponse:
         if not await self.products.exists(data.product_id):
-            raise HTTPException(status_code=404, detail="Product not found")
+            raise NotFoundError("Product not found")
 
         threshold_usd = await self._to_usd(data.threshold_price, data.currency)
 
@@ -59,7 +58,7 @@ class AlertService:
     async def delete_alert(self, user_id: uuid.UUID, alert_id: uuid.UUID) -> None:
         deleted = await self.alerts.delete(alert_id, user_id)
         if deleted == 0:
-            raise HTTPException(status_code=404, detail="Alert not found")
+            raise NotFoundError("Alert not found")
         logger.info(f"Alert deleted | user={user_id} alert={alert_id}")
 
     async def check_alerts(self) -> int:

@@ -37,6 +37,32 @@ class ProductRepo(BaseRepository):
         )
         return (await self.db.execute(q)).all()
 
+    async def list_watchlist_details(self, user_id: uuid.UUID) -> Sequence[Row]:
+        """Карточки всех товаров watchlist пользователя одним запросом.
+
+        Колонки: (id, title, description, category, price_min, price_max,
+        shops_count). Диапазон цен — по сегодняшним записям. Используется вместо
+        N запросов get_detail на каждый товар.
+        """
+        latest = latest_price_subq(utc_today_start())
+        q = (
+            select(
+                Product.id,
+                Product.title,
+                Product.description,
+                Product.category,
+                func.min(latest.c.price_usd).label("price_min"),
+                func.max(latest.c.price_usd).label("price_max"),
+                func.count(ProductShop.id).label("shops_count"),
+            )
+            .join(UserProduct, UserProduct.product_id == Product.id)
+            .join(ProductShop, ProductShop.product_id == Product.id)
+            .outerjoin(latest, latest.c.product_shop_id == ProductShop.id)
+            .where(UserProduct.user_id == user_id)
+            .group_by(Product.id)
+        )
+        return (await self.db.execute(q)).all()
+
     async def get_detail(self, product_id: uuid.UUID) -> Row | None:
         """Карточка товара с агрегатами цен или None, если товара нет.
 

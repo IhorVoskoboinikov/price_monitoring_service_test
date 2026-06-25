@@ -1,7 +1,6 @@
 import uuid
 
-from fastapi import HTTPException
-
+from app.core.exceptions import ConflictError, NotFoundError
 from app.core.logger import get_logger
 from app.db.repositories.product_repo import ProductRepo
 from app.db.repositories.user_product_repo import UserProductRepo
@@ -28,22 +27,19 @@ class UserProductService:
     async def list_tracked(
         self, user_id: uuid.UUID, currency: Currency = Currency.USD
     ) -> list[ProductDetail]:
-        product_ids = await self.user_products.list_product_ids(user_id)
-        return [
-            await self.price_service.get_product_detail(pid, currency)
-            for pid in product_ids
-        ]
+        # Один агрегирующий запрос на весь watchlist (без N+1 по товарам).
+        return await self.price_service.get_watchlist_details(user_id, currency)
 
     async def add(self, user_id: uuid.UUID, product_id: uuid.UUID) -> None:
         if not await self.products.exists(product_id):
-            raise HTTPException(status_code=404, detail="Product not found")
+            raise NotFoundError("Product not found")
         if await self.user_products.exists(user_id, product_id):
-            raise HTTPException(status_code=409, detail="Product already in watchlist")
+            raise ConflictError("Product already in watchlist")
         self.user_products.add(user_id, product_id)
         logger.info(f"Watchlist add | user={user_id} product={product_id}")
 
     async def remove(self, user_id: uuid.UUID, product_id: uuid.UUID) -> None:
         deleted = await self.user_products.delete(user_id, product_id)
         if deleted == 0:
-            raise HTTPException(status_code=404, detail="Product not in watchlist")
+            raise NotFoundError("Product not in watchlist")
         logger.info(f"Watchlist remove | user={user_id} product={product_id}")

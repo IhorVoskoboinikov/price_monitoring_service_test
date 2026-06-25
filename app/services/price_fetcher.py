@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 
 from app.core.logger import get_logger, log_operation
 from app.db.models.shop import Shop
@@ -72,7 +71,7 @@ class PriceFetcherService:
                 if ps.id in recently_priced:
                     deduped += 1
                     continue  # свежий снимок уже есть — не дублируем
-                self.prices.add_price(ps.id, Decimal(str(product.price_usd)))
+                self.prices.add_price(ps.id, product.price_usd)
                 count += 1
 
             await self.prices.flush()

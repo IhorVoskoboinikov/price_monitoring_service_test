@@ -1,7 +1,6 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,8 +18,8 @@ class AlertCreate(BaseModel):
 class AlertResponse(BaseModel):
     id: uuid.UUID
     product_id: uuid.UUID
-    threshold_price_usd: Optional[Decimal]
-    currency_code: Optional[Currency]
+    threshold_price_usd: Decimal | None
+    currency_code: Currency | None
     is_active: bool
     created_at: datetime
 

@@ -45,28 +45,31 @@ Celery Beat  ->  задачи (сбор цен, проверка алертов,
 ## Быстрый старт (Docker Compose)
 
 ```bash
-# 1. Конфиг
+# 1. Конфиг (единственный обязательный шаг)
 cp .env.example .env
 # отредактируйте .env: как минимум APP_SECRET_KEY.
 # Для реальной отправки писем — EMAIL_ENABLED=true и рабочие SMTP_* (см. ниже).
 
-# 2. Инфраструктура
-docker compose up -d postgres redis
+# 2. Поднять весь стек одной командой
+docker compose up -d --build
 
-# 3. Миграции
-docker compose run --rm migrate
-
-# 4. Запуск всего стека (seed выполнится автоматически в контейнере api)
-docker compose up -d
-
-# Проверить, что seed отработал
-docker compose logs api | grep -i seed
+# 3. Наблюдать старт и автоматический seed
+docker compose logs -f api
 ```
+
+`docker compose` сам выстраивает порядок: `postgres`/`redis` (healthcheck) →
+`migrate` (`alembic upgrade head`, ждём успешного завершения через
+`depends_on: condition: service_completed_successfully`) → `api`/`worker` →
+`beat`. Отдельно поднимать инфраструктуру и гонять миграции не нужно.
 
 API: <http://localhost:8000>, Swagger: <http://localhost:8000/docs>.
 
-> При первом старте `api` через FastAPI lifespan наполняет БД (магазины, товары
-> из обоих API, сегодняшние курсы). При повторных стартах seed пропускается.
+> При старте `api` через FastAPI lifespan наполняет БД (магазины, товары из обоих
+> API, сегодняшние курсы). Шаги идемпотентны: магазины/товары создаются один раз,
+> курсы синхронизируются на каждом старте.
+>
+> Миграции можно при желании запускать отдельно (например, в CI):
+> `docker compose run --rm migrate`.
 
 ## Авторизация
 
@@ -117,18 +120,28 @@ uv run python scripts/sync_historical_rates.py 30   # за последние 30
 
 ## Тесты
 
-Тесты гоняются на реальном PostgreSQL в Docker через `testcontainers` (тот же
-диалект, что в проде — честно проверяются UUID, on-conflict upsert, оконные
-функции и партиционирование). Redis замокан `fakeredis`, внешние API (НБУ,
-магазины) — фейковым httpx-клиентом, сеть не используется.
+Набор разделён по уровням пирамиды:
+
+- **`tests/unit/`** — чистая логика (тренд, сортировки, ретраи, парсинг
+  адаптеров с мок-`httpx`). Ни БД, ни сети — **Docker не нужен**, гоняются за
+  доли секунды. То, что запускают на каждый коммит в CI.
+- **`tests/integration/`** — API-ручки и сервисы на реальном PostgreSQL в Docker
+  через `testcontainers` (тот же диалект, что в проде — честно проверяются UUID,
+  on-conflict upsert, оконные функции и партиционирование). Redis замокан
+  `fakeredis`, внешние API (НБУ, магазины) — фейковым httpx-клиентом.
+
+Тяжёлые фикстуры (контейнер, наполнение БД) живут в
+`tests/integration/conftest.py`, поэтому unit-набор их не подхватывает.
 
 ```bash
-uv run python tests/run.py          # весь набор + отчёт покрытия
-uv run python tests/run.py -k alert # фильтр по имени
+uv run python tests/run.py              # весь набор + отчёт покрытия
+uv run python tests/run.py unit         # только unit — без Docker, мгновенно
+uv run python tests/run.py integration  # только integration (testcontainers)
+uv run python tests/run.py -k alert     # фильтр по имени
 ```
 
 `tests/run.py` запускает pytest с покрытием (term + HTML в `tests/htmlcov`).
-Требуется запущенный Docker (для testcontainers).
+Для `integration`/полного набора нужен запущенный Docker.
 
 ## Локальная разработка
 

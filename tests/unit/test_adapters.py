@@ -1,6 +1,8 @@
 """Юнит-тесты адаптеров магазинов: маппинг ответов в ShopProduct, пагинация
 DummyJSON и retry на 429. Сеть замокана фейковым httpx-клиентом."""
 
+from decimal import Decimal
+
 import httpx
 import pytest
 
@@ -58,7 +60,8 @@ async def test_fakestore_maps_fields(monkeypatch):
 
     assert [p.external_id for p in products] == ["1", "2"]
     assert products[0].title == "Backpack"
-    assert products[0].price_usd == 109.95
+    assert products[0].price_usd == Decimal("109.95")  # деньги — Decimal, не float
+    assert isinstance(products[0].price_usd, Decimal)
     assert products[1].category == "clothes"
 
 
