@@ -1,0 +1,118 @@
+services:
+
+  # ── PostgreSQL ───────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── pgAdmin — UI для PostgreSQL ──────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+
+  # ── Миграции (запускается один раз и завершается) ────────
+  migrate:
+    build: .
+    command: >
+      sh -c "python -m app.core.wait_for_db &&
+             alembic upgrade head"
+    env_file: .env
+    volumes:
+      - .:/app
+      - /app/.venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # ── FastAPI приложение ───────────────────────────────────
+  api:
+    build: .
+    command: >
+      sh -c "python -m app.core.wait_for_db &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      RUN_SEED_ON_STARTUP: "true"
+    volumes:
+      - .:/app
+      - /app/.venv  # анонимный volume — сохраняет venv контейнера при монтировании кода
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # ── Celery Worker ────────────────────────────────────────
+  worker:
+    build: .
+    command: >
+      sh -c "python -m app.core.wait_for_db &&
+             celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4"
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - .:/app
+      - /app/.venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # ── Celery Beat (планировщик) ────────────────────────────
+  beat:
+    build: .
+    command: >
+      celery -A app.tasks.celery_app beat --loglevel=info
+      --scheduler celery.beat.PersistentScheduler
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - .:/app
+      - /app/.venv
+    depends_on:
+      - worker
+
+volumes:
+  postgres_data:
+  redis_data:
+  pgadmin_data:

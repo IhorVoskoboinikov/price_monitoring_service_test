@@ -1,0 +1,52 @@
+# Environment
+.env
+.env.prod
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# MyPy
+.mypy_cache/
+
+# Ruff
+.ruff_cache/
+
+# IDE
+.idea/
+.vscode/
+
+# Docker
+*.log
+
+# Alembic
+alembic/versions/*.pyc
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# AI assistants (Claude Code и т.п.) — локальные настройки и артефакты агента
+.claude/
+.cursor/
+.aider*
+
+# OS
+.DS_Store
+Thumbs.db
