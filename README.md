@@ -120,18 +120,28 @@ uv run python scripts/sync_historical_rates.py 30   # за последние 30
 
 ## Тесты
 
-Тесты гоняются на реальном PostgreSQL в Docker через `testcontainers` (тот же
-диалект, что в проде — честно проверяются UUID, on-conflict upsert, оконные
-функции и партиционирование). Redis замокан `fakeredis`, внешние API (НБУ,
-магазины) — фейковым httpx-клиентом, сеть не используется.
+Набор разделён по уровням пирамиды:
+
+- **`tests/unit/`** — чистая логика (тренд, сортировки, ретраи, парсинг
+  адаптеров с мок-`httpx`). Ни БД, ни сети — **Docker не нужен**, гоняются за
+  доли секунды. То, что запускают на каждый коммит в CI.
+- **`tests/integration/`** — API-ручки и сервисы на реальном PostgreSQL в Docker
+  через `testcontainers` (тот же диалект, что в проде — честно проверяются UUID,
+  on-conflict upsert, оконные функции и партиционирование). Redis замокан
+  `fakeredis`, внешние API (НБУ, магазины) — фейковым httpx-клиентом.
+
+Тяжёлые фикстуры (контейнер, наполнение БД) живут в
+`tests/integration/conftest.py`, поэтому unit-набор их не подхватывает.
 
 ```bash
-uv run python tests/run.py          # весь набор + отчёт покрытия
-uv run python tests/run.py -k alert # фильтр по имени
+uv run python tests/run.py              # весь набор + отчёт покрытия
+uv run python tests/run.py unit         # только unit — без Docker, мгновенно
+uv run python tests/run.py integration  # только integration (testcontainers)
+uv run python tests/run.py -k alert     # фильтр по имени
 ```
 
 `tests/run.py` запускает pytest с покрытием (term + HTML в `tests/htmlcov`).
-Требуется запущенный Docker (для testcontainers).
+Для `integration`/полного набора нужен запущенный Docker.
 
 ## Локальная разработка
 
