@@ -5,8 +5,8 @@ import uuid
 
 import fakeredis.aioredis
 import pytest
-from fastapi import HTTPException
 
+from app.core.exceptions import ConflictError, NotFoundError
 from app.db.repositories.exchange_rate_repo import ExchangeRateRepo
 from app.db.repositories.price_repo import PriceRepo
 from app.db.repositories.product_repo import ProductRepo
@@ -41,16 +41,14 @@ async def test_add_success(db):
     assert ids == {PRODUCT_1_ID, PRODUCT_2_ID}
 
 
-async def test_add_nonexistent_product_raises_404(db):
-    with pytest.raises(HTTPException) as exc:
+async def test_add_nonexistent_product_raises_not_found(db):
+    with pytest.raises(NotFoundError):
         await _service(db).add(DEMO_USER_ID, uuid.uuid4())
-    assert exc.value.status_code == 404
 
 
-async def test_add_duplicate_raises_409(db):
-    with pytest.raises(HTTPException) as exc:
+async def test_add_duplicate_raises_conflict(db):
+    with pytest.raises(ConflictError):
         await _service(db).add(DEMO_USER_ID, PRODUCT_1_ID)  # уже в watchlist
-    assert exc.value.status_code == 409
 
 
 async def test_remove_success(db):
@@ -60,7 +58,6 @@ async def test_remove_success(db):
     assert await svc.list_tracked(DEMO_USER_ID) == []
 
 
-async def test_remove_not_tracked_raises_404(db):
-    with pytest.raises(HTTPException) as exc:
+async def test_remove_not_tracked_raises_not_found(db):
+    with pytest.raises(NotFoundError):
         await _service(db).remove(DEMO_USER_ID, PRODUCT_2_ID)  # не отслеживается
-    assert exc.value.status_code == 404

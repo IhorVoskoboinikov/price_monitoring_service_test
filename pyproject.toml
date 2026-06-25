@@ -38,6 +38,8 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+# Дом-стиль — datetime.timezone.utc (единообразно во всём коде), а не datetime.UTC.
+ignore = ["UP017"]
 
 [tool.mypy]
 python_version = "3.12"

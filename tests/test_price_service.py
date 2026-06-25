@@ -10,9 +10,9 @@ from decimal import Decimal
 
 import fakeredis.aioredis
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import delete, select
 
+from app.core.exceptions import NotFoundError
 from app.db.models.price_history import PriceHistory
 from app.db.models.product_shop import ProductShop
 from app.db.repositories.exchange_rate_repo import ExchangeRateRepo
@@ -123,6 +123,5 @@ async def test_current_prices_only_today(db):
 
 
 async def test_product_detail_not_found_raises(db):
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(NotFoundError):
         await _service(db).get_product_detail(uuid.uuid4(), Currency.USD)
-    assert exc.value.status_code == 404

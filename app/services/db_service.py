@@ -1,6 +1,5 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -12,45 +11,55 @@ from app.core.config import settings
 
 
 class DatabaseService:
+    """Общий engine приложения.
+
+    FastAPI работает в одном event loop (uvicorn), поэтому переиспользует общий
+    пул соединений через `session()`. Для Celery-задач, где `asyncio.run()`
+    создаёт новый event loop на каждый вызов, общий engine использовать нельзя
+    (asyncpg-соединения привязаны к loop'у) — там применяется `begin_task_session()`.
+    """
+
     def __init__(self) -> None:
         self.engine = create_async_engine(
             str(settings.database_url),
             pool_size=settings.db_pool_size,
             max_overflow=settings.db_max_overflow,
             pool_recycle=3600,
+            pool_pre_ping=True,
         )
         self._session_factory = async_sessionmaker(
             self.engine,
             expire_on_commit=False,
             autoflush=False,
-            autocommit=False,
         )
 
-    @staticmethod
-    def _abort_ro(*args: Any, **kwargs: Any) -> None:
-        raise RuntimeError("Write operation attempted on a read-only session")
-
-    def create_session(self, readonly: bool = True) -> AsyncSession:
-        session = self._session_factory()
-        if readonly:
-            session.flush = DatabaseService._abort_ro  # type: ignore[method-assign]
-            session.commit = DatabaseService._abort_ro  # type: ignore[method-assign]
-        return session
-
     @asynccontextmanager
-    async def create_session_if_missing(
-        self,
-        readonly: bool = True,
-        db_session: AsyncSession | None = None,
-    ) -> AsyncGenerator[tuple[bool, AsyncSession], None]:
-        if db_session is None:
-            async with self.create_session(readonly=readonly) as session:
-                yield False, session
-        else:
-            yield True, db_session
+    async def session(self) -> AsyncGenerator[AsyncSession, None]:
+        """Сессия на общем engine приложения (один event loop)."""
+        async with self._session_factory() as session:
+            yield session
 
     async def dispose(self) -> None:
         await self.engine.dispose()
 
 
 db_service = DatabaseService()
+
+
+@asynccontextmanager
+async def begin_task_session() -> AsyncGenerator[AsyncSession, None]:
+    """Сессия с собственным engine на текущий event loop — для Celery-задач.
+
+    Каждый запуск задачи идёт через `asyncio.run()` (новый loop), поэтому
+    поднимаем изолированный engine и гарантированно закрываем его в конце,
+    чтобы не переиспользовать соединения из чужого/закрытого loop'а.
+    """
+    engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
+    try:
+        factory = async_sessionmaker(
+            engine, expire_on_commit=False, autoflush=False
+        )
+        async with factory() as session:
+            yield session
+    finally:
+        await engine.dispose()

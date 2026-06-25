@@ -3,8 +3,7 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from fastapi import HTTPException
-
+from app.core.exceptions import NotFoundError
 from app.core.logger import get_logger
 from app.db.repositories.price_repo import PriceRepo
 from app.db.repositories.product_repo import ProductRepo
@@ -96,7 +95,7 @@ class PriceService:
     ) -> ProductDetail:
         row = await self.products.get_detail(product_id)
         if row is None:
-            raise HTTPException(status_code=404, detail="Product not found")
+            raise NotFoundError("Product not found")
 
         return ProductDetail(
             id=row.id,
@@ -109,6 +108,25 @@ class PriceService:
             shops_count=row.shops_count,
         )
 
+    async def get_watchlist_details(
+        self, user_id: uuid.UUID, currency: Currency
+    ) -> list[ProductDetail]:
+        """Карточки всех отслеживаемых товаров одним запросом (без N+1)."""
+        rows = await self.products.list_watchlist_details(user_id)
+        return [
+            ProductDetail(
+                id=row.id,
+                title=row.title,
+                description=row.description,
+                category=row.category,
+                price_min=await self._convert_opt(row.price_min, currency),
+                price_max=await self._convert_opt(row.price_max, currency),
+                currency=currency,
+                shops_count=row.shops_count,
+            )
+            for row in rows
+        ]
+
     # ── Current prices per shop ───────────────────────────────────────────
 
     async def get_current_prices(
@@ -116,7 +134,7 @@ class PriceService:
     ) -> list[ShopPriceItem]:
         rows = await self.prices.get_current_prices(product_id)
         if not rows and not await self.products.exists(product_id):
-            raise HTTPException(status_code=404, detail="Product not found")
+            raise NotFoundError("Product not found")
 
         result = []
         for row in rows:

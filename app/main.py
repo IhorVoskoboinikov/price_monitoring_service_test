@@ -1,10 +1,12 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 
 from app.api import router as api_router
 from app.core.config import settings
+from app.core.exceptions import AppError
 from app.core.logger import get_logger, log_operation, setup_logging
 from app.core.redis import redis_client
 from app.db.models.product import Product
@@ -21,7 +23,7 @@ logger = get_logger(__name__)
 
 async def run_seed_if_needed() -> None:
     with log_operation(logger, "startup seed"):
-        async with db_service.create_session(readonly=False) as db:
+        async with db_service.session() as db:
             await seed_demo_user(db)
 
             # Каждый шаг проверяем независимо — защита от частично выполненного seed
@@ -75,5 +77,11 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    """Маппинг доменных исключений в HTTP-ответы."""
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
 
 app.include_router(api_router)

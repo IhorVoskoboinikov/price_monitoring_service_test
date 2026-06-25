@@ -48,7 +48,7 @@ CurrentUserId = Annotated[uuid.UUID, Depends(get_current_user_id)]
 async def _get_db() -> AsyncGenerator[AsyncSession, None]:
     """Сессия на запрос. Транзакция управляется здесь: commit при успехе,
     rollback при любой ошибке. Сервисы и репозитории не коммитят сами."""
-    async with db_service.create_session(readonly=False) as db:
+    async with db_service.session() as db:
         try:
             yield db
             await db.commit()

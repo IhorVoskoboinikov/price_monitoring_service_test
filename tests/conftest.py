@@ -24,12 +24,12 @@ from app.api.deps import _get_db
 from app.core.config import settings
 from app.db.models.base import Base
 from app.db.models.exchange_rate import ExchangeRate
+from app.db.models.price_history import PriceHistory
 from app.db.models.product import Product
 from app.db.models.product_shop import ProductShop
 from app.db.models.shop import Shop
 from app.db.models.user import User
 from app.db.models.user_product import UserProduct
-from app.db.models.price_history import PriceHistory
 from app.main import app
 
 # ── Детерминированные идентификаторы тестовых данных ───────────────────────────
