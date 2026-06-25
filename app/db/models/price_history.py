@@ -1,7 +1,16 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, Numeric, func
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    Numeric,
+    desc,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.models.base import Base
@@ -24,6 +33,17 @@ class PriceHistory(Base):
     )
 
     __table_args__ = (
-        Index("ix_price_history_lookup", "product_shop_id", "recorded_at"),
+        # Покрывающий индекс под два горячих чтения самой большой таблицы:
+        #  • «последняя цена магазина» (row_number OVER ... ORDER BY recorded_at DESC)
+        #  • история/агрегаты по диапазону дат.
+        # recorded_at DESC — под порядок «последней»; INCLUDE(price_usd) даёт
+        # index-only scan (без обращения к heap). Заменяет прежний индекс,
+        # а не добавляет — write-amplification не растёт.
+        Index(
+            "ix_price_history_lookup",
+            "product_shop_id",
+            desc("recorded_at"),
+            postgresql_include=["price_usd"],
+        ),
         {"postgresql_partition_by": "RANGE (recorded_at)"},
     )

@@ -2,7 +2,17 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import CHAR, Boolean, DateTime, ForeignKey, Index, Numeric, func
+from sqlalchemy import (
+    CHAR,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    desc,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,5 +36,15 @@ class PriceAlert(Base):
     )
 
     __table_args__ = (
-        Index("ix_price_alert_active_product", "is_active", "product_id"),
+        # Список алертов юзера: WHERE user_id ORDER BY created_at DESC.
+        # Композит закрывает и фильтр, и сортировку.
+        Index("ix_price_alert_user_created", "user_id", desc("created_at")),
+        # Проверка срабатывания смотрит только активные. После срабатывания
+        # алерт деактивируется → таблица со временем в основном «мёртвая».
+        # Partial-индекс по живым строкам меньше и быстрее полного.
+        Index(
+            "ix_price_alert_active",
+            "product_id",
+            postgresql_where=text("is_active"),
+        ),
     )

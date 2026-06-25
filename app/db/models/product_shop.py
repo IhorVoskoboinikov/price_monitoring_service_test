@@ -20,4 +20,7 @@ class ProductShop(Base):
     __table_args__ = (
         UniqueConstraint("product_id", "shop_id"),
         Index("ix_product_shop_product_id", "product_id"),
+        # Фетчер берёт связи по магазину (list_product_shops(shop_id)); при
+        # миллионах товаров без этого индекса — seq scan на каждый цикл сбора.
+        Index("ix_product_shop_shop_id", "shop_id"),
     )
