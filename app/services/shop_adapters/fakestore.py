@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import httpx
 
 from app.core.config import settings
@@ -25,7 +27,7 @@ class FakeStoreAdapter(BaseShopAdapter):
                 title=p["title"],
                 description=p.get("description", ""),
                 category=p.get("category", ""),
-                price_usd=float(p["price"]),
+                price_usd=Decimal(str(p["price"])),
             )
             for p in resp.json()
         ]

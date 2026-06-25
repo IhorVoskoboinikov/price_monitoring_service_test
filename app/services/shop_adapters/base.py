@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from decimal import Decimal
 
 
 @dataclass
@@ -8,7 +9,7 @@ class ShopProduct:
     title: str
     description: str
     category: str
-    price_usd: float
+    price_usd: Decimal
 
 
 class BaseShopAdapter(ABC):

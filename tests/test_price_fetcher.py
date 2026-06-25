@@ -2,6 +2,8 @@
 адаптеры (замокано), пишет в price_history только смапленные товары и
 не дублирует цену, снятую недавно (< 1 часа)."""
 
+from decimal import Decimal
+
 from sqlalchemy import delete, func, select
 
 from app.db.models.price_history import PriceHistory
@@ -13,12 +15,12 @@ from app.services.shop_adapters.base import ShopProduct
 # seed: dummyjson хранит external_id "1"(p1) и "2"(p2), fakestore — "101"(p1).
 ADAPTERS = {
     "dummyjson": [
-        ShopProduct("1", "P1", "", "c", 20.0),
-        ShopProduct("2", "P2", "", "c", 30.0),
-        ShopProduct("999", "Ghost", "", "c", 1.0),  # не смаплен → пропуск
+        ShopProduct("1", "P1", "", "c", Decimal("20.0")),
+        ShopProduct("2", "P2", "", "c", Decimal("30.0")),
+        ShopProduct("999", "Ghost", "", "c", Decimal("1.0")),  # не смаплен → пропуск
     ],
     "fakestore": [
-        ShopProduct("101", "P1", "", "c", 25.0),
+        ShopProduct("101", "P1", "", "c", Decimal("25.0")),
     ],
 }
 

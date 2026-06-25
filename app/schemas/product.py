@@ -1,6 +1,5 @@
 import uuid
 from decimal import Decimal
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -10,9 +9,9 @@ from app.schemas.enums import Currency, TrendDirection
 class ProductListItem(BaseModel):
     id: uuid.UUID
     title: str
-    category: Optional[str]
-    price_min: Optional[Decimal]
-    price_max: Optional[Decimal]
+    category: str | None
+    price_min: Decimal | None
+    price_max: Decimal | None
     currency: Currency
     trend: TrendDirection
 
@@ -29,10 +28,10 @@ class ProductListResponse(BaseModel):
 class ProductDetail(BaseModel):
     id: uuid.UUID
     title: str
-    description: Optional[str]
-    category: Optional[str]
-    price_min: Optional[Decimal]
-    price_max: Optional[Decimal]
+    description: str | None
+    category: str | None
+    price_min: Decimal | None
+    price_max: Decimal | None
     currency: Currency
     shops_count: int
 
