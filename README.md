@@ -4,8 +4,8 @@ A FastAPI backend service for tracking product price changes across several
 shops (DummyJSON, FakeStore), with price history, currency conversion using NBU
 rates, and email alerts when a price drops below a threshold.
 
-Test assignment (Middle+ / Senior Python Developer). A detailed architecture
-description is in [`price_tracker_architecture.md`](price_tracker_architecture.md).
+A detailed architecture description is in
+[`price_tracker_architecture.md`](price_tracker_architecture.md).
 
 ## Features
 
