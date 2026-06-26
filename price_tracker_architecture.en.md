@@ -275,7 +275,7 @@ GET /api/v1/products/{product_id}/price-history
 | `POST /api/v1/me/products` | Body: `{ product_id }`. Add a product to the list |
 | `DELETE /api/v1/me/products/{product_id}` | Remove a product from tracking |
 
-> **How a user builds the tracking list.** The assignment states that the *way* the list is created "is omitted". The boundary is taken as follows: **the catalog is filled automatically** (seed + periodic price collection from DummyJSON and FakeStore, see 5.5/5.7), and the user **marks the products they want from the catalog** into their personal watchlist by `product_id`. The user does not add an arbitrary product by URL — they choose from products the system already knows.
+> **How a user builds the tracking list.** The assignment states that the *way* the list is created "is omitted". The boundary is taken as follows: **the catalog is filled automatically** (seed + periodic price collection from DummyJSON and FakeStore, see 5.5/5.7), and the user **marks the products they want from the catalog** into their personal watchlist by `product_id`. The user does not add an arbitrary product by URL — they choose from products the system already knows (browse the catalog via `GET /api/v1/catalog`, see 4.7).
 >
 > Implementation: a many-to-many link `UserProduct(user_id, product_id)` (3.7). `POST /me/products` checks that the product exists (404 otherwise) and is not yet in the list (409 otherwise), and adds a row; `user_id` is taken from the JWT — the list is private. The product list page (4.1) already returns **only** the current user's watchlist (JOIN on `UserProduct`), not the whole catalog.
 
@@ -287,7 +287,20 @@ GET /api/v1/products/{product_id}/price-history
 | `POST /api/v1/me/alerts` | Body: `{ product_id, threshold_price, currency }`. Create an alert |
 | `DELETE /api/v1/me/alerts/{alert_id}` | Delete an alert |
 
-### 4.7 Utility endpoints
+### 4.7 Catalog — browse all products
+
+```
+GET /api/v1/catalog
+```
+
+| Parameter | Description |
+|---|---|
+| Query params | `currency=USD`, pagination `page` / `page_size` |
+| Response 200 | `{ items: [CatalogItem], page, page_size, total }` |
+| `CatalogItem` | `id, title, category, price_min, price_max, currency, shops_count` |
+| Purpose | Browse the **whole** catalog (not the watchlist) so the user can find a `product_id` to track (see 4.5). Pagination and `ORDER BY` are done in the DB, so it scales to a large catalog (unlike the in-memory watchlist listing, see 5.2). |
+
+### 4.8 Utility endpoints
 
 | Method + URL | Description |
 |---|---|
@@ -406,13 +419,12 @@ class ShopProduct:
 
 ```python
 class BaseShopAdapter(ABC):
+    def __init__(self, base_url: str) -> None:
+        self.base_url = base_url
+
     @abstractmethod
     async def fetch_products(self) -> list[ShopProduct]:
         """Return the list of products with prices."""
-
-    @abstractmethod
-    async def fetch_product(self, external_id: str) -> ShopProduct | None:
-        """Return a single product by ID."""
 
 
 class FakeStoreAdapter(BaseShopAdapter):
@@ -559,14 +571,6 @@ class NewShopAdapter(BaseShopAdapter):
             ShopProduct(external_id=str(p["id"]), title=p["name"], price_usd=p["price"])
             for p in resp.json()
         ]
-
-    async def fetch_product(self, external_id: str) -> ShopProduct | None:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"https://newshop.com/api/products/{external_id}")
-        if resp.status_code == 404:
-            return None
-        p = resp.json()
-        return ShopProduct(external_id=str(p["id"]), title=p["name"], price_usd=p["price"])
 ```
 
 **Step 2 — Register it in the registry**
@@ -597,50 +601,55 @@ Steps 1–3 (adapter, registry, DB row) are implemented and are enough for the n
 
 ### 5.7 Mapping products between shops
 
-**The strategy for this assignment — mapping by index at initialization.**
+**The strategy for this assignment — mapping by nearest price at initialization.**
 
-On first run `seed_products()` runs, loading products from all shops and combining them by position in the list. This matches the assignment condition: *"you may combine ids from different APIs arbitrarily"*.
+The DummyJSON and FakeStore catalogs barely overlap, which is why the assignment
+allows combining ids "arbitrarily". On first run `seed_products()` creates one
+logical product per DummyJSON product, then attaches each FakeStore product as a
+second shop to the **closest-priced** DummyJSON product (1:1, each used once). This
+keeps the two shop prices of a two-shop product close — the range looks realistic
+instead of a random pair (a $1899 bed ↔ a $109 backpack, as map-by-index would give).
 
 ```python
 # app/tasks/seed.py
-async def seed_products(db: AsyncSession) -> None:
-    dummy_products     = await DummyJsonAdapter().fetch_products()   # ~194 products (paginated)
-    fakestore_products = await FakeStoreAdapter().fetch_products()   # 20 products
+def _map_by_nearest_price(dummy_products, fakestore_products) -> dict[int, ShopProduct]:
+    """Each FakeStore product -> nearest-priced DummyJSON product (greedy, 1:1)."""
+    mapping, used = {}, set()
+    for fakestore in fakestore_products:
+        best_idx, best_gap = None, None
+        for i, dummy in enumerate(dummy_products):
+            if i in used:
+                continue
+            gap = abs(dummy.price_usd - fakestore.price_usd)
+            if best_gap is None or gap < best_gap:
+                best_idx, best_gap = i, gap
+        if best_idx is None:
+            break
+        used.add(best_idx)
+        mapping[best_idx] = fakestore
+    return mapping
 
-    for i, dummy in enumerate(dummy_products):
-        # Create a single logical product entity.
-        # Take the description from DummyJSON and fix the source (see section 3.3)
-        product = Product(
-            title=dummy.title,
-            description=dummy.description,
-            category=dummy.category,
-            description_source_shop_id=DUMMYJSON_SHOP_ID,
-        )
-        db.add(product)
 
-        # Link to DummyJSON — always present
-        db.add(ProductShop(
-            product=product,
-            shop_id=DUMMYJSON_SHOP_ID,
-            external_id=dummy.external_id,
-        ))
+async def seed_products(db: AsyncSession, shop_ids) -> None:
+    dummy_products     = await DummyJsonAdapter(...).fetch_products()   # ~194 products
+    fakestore_products = await FakeStoreAdapter(...).fetch_products()   # 20 products
 
-        # Link to FakeStore — if there is a product with the same index
-        if i < len(fakestore_products):
-            db.add(ProductShop(
-                product=product,
-                shop_id=FAKESTORE_SHOP_ID,
-                external_id=fakestore_products[i].external_id,
-            ))
+    product_ids = []
+    for dummy in dummy_products:                 # each DummyJSON product = one logical product
+        pid = uuid.uuid4(); product_ids.append(pid)
+        db.add(Product(id=pid, title=dummy.title, description=dummy.description,
+                       category=dummy.category, description_source_shop_id=dummyjson_id))
+        db.add(ProductShop(product_id=pid, shop_id=dummyjson_id, external_id=dummy.external_id))
 
+    for idx, fs in _map_by_nearest_price(dummy_products, fakestore_products).items():
+        db.add(ProductShop(product_id=product_ids[idx], shop_id=fakestore_id,
+                           external_id=fs.external_id))
     await db.commit()
 ```
 
-**Result:** the first 20 products (by index) get prices from two shops — DummyJSON and FakeStore, the other ~174 DummyJSON products — from one shop only. This is enough to demonstrate all features: the price range, per-shop history, and the chart.
+**Result:** the 20 FakeStore products attach to the nearest-priced DummyJSON products and get prices from two shops, the other ~174 — from one shop only. The two shop prices of such products are close (in the demo the worst gap is ~$100, most are <$12). This is enough to demonstrate all features: the price range, per-shop history, and the chart.
 
-**Idempotency:** before inserting, the existence of `ProductShop` by `(shop_id, external_id)` is checked — re-running the seed does not create duplicates.
-
-> **Evolution path in production:** as the number of shops grows, mapping by index is replaced by a `ProductMatcherService` with fuzzy-matching by title (`rapidfuzz`) and extra signals (category, price proximity). The DB structure does not change — only the logic that fills `ProductShop`.
+> **Evolution path in production:** as the number of shops grows, mapping by price is replaced by a `ProductMatcherService` with fuzzy-matching by title (`rapidfuzz`) and extra signals (category, price proximity). The DB structure does not change — only the logic that fills `ProductShop`.
 
 ### 5.8 Lifespan — automatic seed run
 
@@ -694,7 +703,7 @@ async def run_seed_if_needed() -> None:
 | `fetch_prices_task` | Every N hours (from `.env`) | Poll all active shops, write `PriceHistory` |
 | `sync_exchange_rates_task` | Daily at 08:00 UTC | Load today's NBU rates |
 | `check_price_alerts_task` | Every N minutes (from `.env`) | Check active alerts, send emails |
-| `create_monthly_partition_task` | On the 1st of each month | Create a new partition of the `PriceHistory` table |
+| `create_price_history_partition_task` | On the 1st of each month | Create a new partition of the `PriceHistory` table |
 
 > **The shop polling interval (4 hours)** — a balance between data freshness and load on the external APIs. Configurable via `FETCH_PRICES_INTERVAL_HOURS` in `.env`.
 
@@ -815,7 +824,7 @@ The product list is a user's watchlist (small), so offset pagination (`page` / `
 
 ### 7.4 Async I/O
 
-FastAPI + async SQLAlchemy + httpx provide non-blocking processing. When polling several shops at once, `asyncio.gather()` is used for parallel requests.
+FastAPI + async SQLAlchemy + httpx provide non-blocking processing: while one request waits on I/O (DB, Redis, an external API), the event loop serves others. Today `fetch_all()` polls the shops **sequentially** (there are only a few — that is enough). A direction of growth, as the number of shops grows, is parallel polling via `asyncio.gather()`.
 
 ### 7.5 Indexes and query optimization
 
@@ -918,6 +927,7 @@ price_tracker/
 │   │   ├── deps.py                # DI: DB session, service providers, auth
 │   │   ├── errors.py              # register_exception_handlers (domain → HTTP)
 │   │   └── v1/
+│   │       ├── catalog.py         # GET /catalog (browse all products)
 │   │       ├── products.py        # /products, /{id}, /{id}/prices, /{id}/price-history
 │   │       ├── user_products.py   # GET/POST/DELETE /me/products (watchlist)
 │   │       ├── alerts.py          # CRUD /me/alerts
@@ -983,7 +993,7 @@ price_tracker/
 | Question | Current decision / status |
 |---|---|
 | Alert deduplication | An alert is deactivated after the first firing. To clarify: re-activate automatically or only manually? |
-| Mapping products between shops | Mapping by index at initialization (`seed_products`). The first 20 products get prices from two shops, the rest — only from DummyJSON. Replaced by fuzzy-matching in production. |
+| Mapping products between shops | Mapping by nearest price at initialization (`seed_products`): each FakeStore product is attached to the closest-priced DummyJSON product. 20 products get prices from two shops, the rest — only from DummyJSON. Replaced by fuzzy-matching by title in production. |
 | Shop polling frequency | Current choice — every 4 hours. Should it be configurable per-shop? |
 | Rate limiting of external APIs | DummyJSON and FakeStore may throttle requests. A retry strategy with exponential backoff is needed. |
 | Email provider | SMTP for dev, SendGrid / AWS SES for production — the final choice depends on the infrastructure. |
@@ -1002,15 +1012,15 @@ Celery Beat
          │
          └─► PriceFetcherService.fetch_all()
                │
-               └─► [for each Shop in the DB, in parallel via asyncio.gather()]
+               └─► [for each Shop in the DB, sequentially]
                      │
                      ├─► get_adapter(shop.adapter_key)
                      ├─► adapter.fetch_products()  ──► HTTP GET /products
                      │                                  (DummyJSON / FakeStore)
-                     └─► save_price(product_shop_id, price_usd)
+                     └─► add_price(product_shop_id, price_usd)
                            │
-                           ├─► INSERT INTO price_history ...
-                           └─► invalidate Redis cache (product_prices:{id}:*)
+                           ├─► dedup: skip if a price was taken < 1 hour ago
+                           └─► INSERT INTO price_history ...
 ```
 
 ---
