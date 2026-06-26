@@ -1,10 +1,10 @@
-"""Pytest-фикстуры для integration-тестов: тестовый Postgres (testcontainers),
-чистая+наполненная БД на каждый тест, async-клиент httpx и авторизация.
+"""Pytest fixtures for integration tests: a test Postgres (testcontainers),
+a clean + seeded DB per test, an async httpx client, and authorization.
 
-База — реальный Postgres в контейнере (тот же диалект, что в проде): честно
-тестируются UUID, on-conflict upsert, оконные функции и партиционирование.
-Эти фикстуры (и autouse-наполнение БД) действуют ТОЛЬКО в tests/integration/ —
-unit-тесты в tests/unit/ их не подхватывают и Docker не поднимают.
+The DB is a real Postgres in a container (the same dialect as prod): UUID,
+on-conflict upsert, window functions, and partitioning are tested for real.
+These fixtures (and the autouse DB seeding) work ONLY in tests/integration/ —
+unit tests in tests/unit/ do not pick them up and do not start Docker.
 """
 
 from collections.abc import AsyncGenerator
@@ -20,7 +20,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
-# Импорт app тянет за собой все модели → Base.metadata заполнена.
+# Importing app pulls in all models -> Base.metadata is filled.
 from app.api.deps import _get_db
 from app.core.config import settings
 from app.db.models.base import Base
@@ -37,21 +37,21 @@ from tests.conftest import DEMO_USER_ID, PRODUCT_1_ID, PRODUCT_2_ID
 __all__ = ["DEMO_USER_ID", "PRODUCT_1_ID", "PRODUCT_2_ID"]
 
 
-# ── Инфраструктура: контейнер, движок, схема ──────────────────────────────────
+# ── Infrastructure: container, engine, schema ─────────────────────────────────
 
 
 @pytest.fixture(scope="session")
 def _postgres_container():
-    """Поднимает Postgres и один раз создаёт схему синхронным движком.
+    """Start Postgres and create the schema once with a sync engine.
 
-    Схему создаём sync-драйвером (psycopg2), чтобы не завязывать DDL на event loop —
-    тогда весь async (движок/сессии/тесты) живёт в одном loop теста.
+    We create the schema with a sync driver (psycopg2) so the DDL is not tied to an
+    event loop — then all async work (engine/sessions/tests) lives in one test loop.
     """
     with PostgresContainer("postgres:16-alpine") as pg:
         sync_engine = create_engine(pg.get_connection_url())
         with sync_engine.begin() as conn:
             Base.metadata.create_all(conn)
-            # price_history партиционирована → нужна партиция, иначе INSERT падает.
+            # price_history is partitioned -> we need a partition, or INSERT fails.
             conn.execute(
                 text(
                     "CREATE TABLE IF NOT EXISTS price_history_default "
@@ -64,7 +64,7 @@ def _postgres_container():
 
 @pytest.fixture(scope="session")
 def _database_url(_postgres_container) -> str:
-    # testcontainers отдаёт URL с sync-драйвером — переводим на asyncpg.
+    # testcontainers gives a URL with a sync driver — switch it to asyncpg.
     return _postgres_container.get_connection_url().replace("psycopg2", "asyncpg")
 
 
@@ -80,7 +80,7 @@ def test_sessionmaker(test_engine) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(test_engine, expire_on_commit=False, autoflush=False)
 
 
-# ── Подмена внешних зависимостей: Redis → fakeredis, _get_db → тестовая сессия ─
+# ── Swap external deps: Redis → fakeredis, _get_db → test session ─────────────
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -110,11 +110,11 @@ def _override_get_db(test_sessionmaker):
     app.dependency_overrides.pop(_get_db, None)
 
 
-# ── Чистая + наполненная БД на каждый тест ────────────────────────────────────
+# ── Clean + seeded DB per test ────────────────────────────────────────────────
 
 
 async def _seed(session: AsyncSession) -> None:
-    """Детерминированный набор данных без обращений к внешним API."""
+    """A deterministic data set with no calls to external APIs."""
     shop1 = Shop(name="DummyJSON", base_url="https://dummyjson.com",
                  adapter_key="dummyjson", is_active=True)
     shop2 = Shop(name="FakeStore", base_url="https://fakestoreapi.com",
@@ -151,7 +151,7 @@ async def _seed(session: AsyncSession) -> None:
         ExchangeRate(currency_code="GBP", rate_uah_per_unit=Decimal("59.0559"), date=today, source="TEST"),
     ])
 
-    # demo-юзер отслеживает только product 1
+    # the demo user watches only product 1
     session.add(UserProduct(user_id=DEMO_USER_ID, product_id=PRODUCT_1_ID))
 
 
@@ -166,7 +166,7 @@ async def _clean_and_seed(test_engine, test_sessionmaker):
     yield
 
 
-# ── Клиент и авторизация ──────────────────────────────────────────────────────
+# ── Client and authorization ──────────────────────────────────────────────────
 
 
 @pytest.fixture
@@ -181,7 +181,7 @@ def auth_headers() -> dict[str, str]:
 
 @pytest_asyncio.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:
-    """Неавторизованный клиент."""
+    """Client without authorization."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -189,7 +189,7 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 
 @pytest_asyncio.fixture
 async def auth_client(auth_headers) -> AsyncGenerator[AsyncClient, None]:
-    """Клиент с Bearer-токеном demo-пользователя для защищённых ручек."""
+    """Client with the demo user's Bearer token for protected endpoints."""
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport, base_url="http://test", headers=auth_headers
@@ -199,6 +199,6 @@ async def auth_client(auth_headers) -> AsyncGenerator[AsyncClient, None]:
 
 @pytest_asyncio.fixture
 async def db(test_sessionmaker) -> AsyncGenerator[AsyncSession, None]:
-    """Прямой доступ к тестовой БД (для подготовки данных и проверок в тестах)."""
+    """Direct access to the test DB (to prepare data and check things in tests)."""
     async with test_sessionmaker() as session:
         yield session

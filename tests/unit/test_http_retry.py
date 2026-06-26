@@ -1,5 +1,5 @@
-"""Юнит-тесты get_with_retry: ретраи на 429/5xx/transient, успех после ретрая
-и проброс ошибки после исчерпания попыток. Сон между попытками замокан."""
+"""Unit tests for get_with_retry: retries on 429/5xx/transient, success after a retry,
+and the error raised after all tries are used. Sleep between tries is mocked."""
 
 import httpx
 import pytest
@@ -25,7 +25,7 @@ class _Resp:
 
 
 class _Client:
-    """Отдаёт ответы/исключения из заданной последовательности по одному за get."""
+    """Returns responses/exceptions from a given sequence, one per get."""
 
     def __init__(self, outcomes: list) -> None:
         self._outcomes = list(outcomes)
@@ -93,4 +93,4 @@ async def test_4xx_other_than_429_is_not_retried():
     client = _Client([_Resp(404)])
     with pytest.raises(httpx.HTTPStatusError):
         await get_with_retry(client, "u", attempts=3)
-    assert client.calls == 1  # 404 не ретраится
+    assert client.calls == 1  # 404 is not retried

@@ -7,19 +7,19 @@ from dotenv import load_dotenv
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-# Загружаем .env — no-op если переменные уже есть в окружении (Docker-контейнер)
+# Load .env — a no-op if the vars are already in the environment (Docker container)
 load_dotenv()
 
-from app.db.models import Base  # noqa: E402 — после load_dotenv  # импортирует все модели через __init__.py
+from app.db.models import Base  # noqa: E402 — after load_dotenv  # imports all models via __init__.py
 
 config = context.config
 
-# DATABASE_URL берётся из окружения:
-#   - В Docker: передаётся через env_file в docker-compose
-#   - Локально: из .env файла (load_dotenv выше)
-#     Для локального запуска alembic postgres должен быть доступен на localhost:5432
-#     (порт проброшен в docker-compose). Замени @postgres на @localhost в .env или
-#     передай переменную явно:
+# DATABASE_URL comes from the environment:
+#   - In Docker: passed via env_file in docker-compose
+#   - Locally: from the .env file (load_dotenv above)
+#     To run alembic locally, postgres must be reachable on localhost:5432
+#     (the port is published in docker-compose). Change @postgres to @localhost in
+#     .env, or pass the variable directly:
 #       DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/price_tracker \
 #         alembic upgrade head
 database_url = os.environ["DATABASE_URL"]

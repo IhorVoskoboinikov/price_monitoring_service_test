@@ -4,10 +4,10 @@ from pydantic import BaseModel, ConfigDict
 
 
 class TokenPayload(BaseModel):
-    """Типизированная полезная нагрузка JWT.
+    """Typed JWT payload.
 
-    Токен статический (см. app/core/security.py). `user_id` обязателен —
-    эндпоинты идентифицируют пользователя по нему; остальные клеймы опциональны.
+    The token is static (see app/core/security.py). `user_id` is required —
+    endpoints identify the user by it; the other claims are optional.
     """
 
     user_id: uuid.UUID

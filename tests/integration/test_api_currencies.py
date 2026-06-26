@@ -1,4 +1,4 @@
-"""API-тесты валют: /currencies отдаёт сегодняшние курсы НБУ."""
+"""API tests for currencies: /currencies returns today's NBU rates."""
 
 
 async def test_currencies_returns_seeded_rates(auth_client):

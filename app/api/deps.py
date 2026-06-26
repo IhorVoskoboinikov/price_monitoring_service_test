@@ -25,7 +25,7 @@ CurrentUser = Annotated[TokenPayload, Depends(verify_token)]
 
 
 def get_current_user_id(user: CurrentUser) -> uuid.UUID:
-    """user_id из JWT (валидация — в TokenPayload/verify_token)."""
+    """User id from the JWT (checked in TokenPayload/verify_token)."""
     return user.user_id
 
 
@@ -35,8 +35,8 @@ CurrentUserId = Annotated[uuid.UUID, Depends(get_current_user_id)]
 
 
 async def _get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Сессия на запрос. Транзакция управляется здесь: commit при успехе,
-    rollback при любой ошибке. Сервисы и репозитории не коммитят сами."""
+    """One session per request. We manage the transaction here: commit on success,
+    rollback on any error. Services and repositories do not commit by themselves."""
     async with db_service.session() as db:
         try:
             yield db

@@ -1,5 +1,5 @@
-"""API-тесты алертов: CRUD, валидация порога, конвертация валюты порога и
-сквозной прогон check_alerts (срабатывание + деактивация + отправка email)."""
+"""API tests for alerts: CRUD, threshold validation, threshold currency conversion,
+and an end-to-end check_alerts run (firing + deactivation + sending email)."""
 
 import uuid
 from decimal import Decimal
@@ -65,7 +65,7 @@ async def test_delete_alert(auth_client):
     assert (await auth_client.get("/api/v1/me/alerts")).json()["items"] == []
 
 
-# ── Валидация ─────────────────────────────────────────────────────────────────
+# ── Validation ────────────────────────────────────────────────────────────────
 
 
 async def test_threshold_must_be_positive(auth_client):
@@ -106,12 +106,12 @@ async def test_alerts_require_auth(client):
     assert resp.status_code == 401
 
 
-# ── Сквозной прогон check_alerts ──────────────────────────────────────────────
+# ── End-to-end check_alerts run ───────────────────────────────────────────────
 
 
 async def test_check_alerts_triggers_and_deactivates(db, monkeypatch):
-    """Порог выше текущей минимальной цены → алерт срабатывает: письмо уходит,
-    is_active становится False, повторный прогон уже ничего не шлёт."""
+    """Threshold above the current lowest price -> the alert fires: an email is sent,
+    is_active becomes False, and a second run sends nothing."""
     sent: list[tuple[str, str, str]] = []
 
     async def fake_send_email(to: str, subject: str, body: str) -> None:
@@ -126,7 +126,7 @@ async def test_check_alerts_triggers_and_deactivates(db, monkeypatch):
         PriceAlert(
             id=alert_id,
             user_id=DEMO_USER_ID,
-            product_id=PRODUCT_1_ID,  # минимальная текущая цена 12.99 USD
+            product_id=PRODUCT_1_ID,  # current lowest price 12.99 USD
             threshold_price_usd=Decimal("9999"),
             currency_code="USD",
             is_active=True,
@@ -155,6 +155,6 @@ async def test_check_alerts_triggers_and_deactivates(db, monkeypatch):
     assert refreshed.is_active is False
     assert refreshed.triggered_at is not None
 
-    # повторный прогон — алерт уже неактивен, писем больше нет
+    # second run — the alert is already inactive, no more emails
     assert await service.check_alerts() == 0
     assert len(sent) == 1

@@ -1,4 +1,4 @@
-"""Юнит-тесты чистой логики (без БД и сети)."""
+"""Unit tests for pure logic (no DB and no network)."""
 
 import uuid
 from decimal import Decimal
@@ -28,7 +28,7 @@ class TestDetermineTrend:
         assert _determine_trend(Decimal("90"), Decimal("100")) == TrendDirection.DOWN
 
     def test_same_within_threshold(self):
-        # +0.5% < порога 1%
+        # +0.5% < the 1% threshold
         assert _determine_trend(Decimal("100.5"), Decimal("100")) == TrendDirection.SAME
 
     def test_same_on_missing_or_zero(self):

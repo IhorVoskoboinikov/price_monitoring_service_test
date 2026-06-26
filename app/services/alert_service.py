@@ -48,7 +48,7 @@ class AlertService:
         )
         self.alerts.add(alert)
         await self.alerts.flush()
-        await self.alerts.refresh(alert)  # подтянуть created_at (server_default)
+        await self.alerts.refresh(alert)  # load created_at (server_default)
         logger.info(
             f"Alert created | user={user_id} product={data.product_id} "
             f"threshold_usd={threshold_usd}"
@@ -62,20 +62,20 @@ class AlertService:
         logger.info(f"Alert deleted | user={user_id} alert={alert_id}")
 
     async def check_alerts(self) -> int:
-        """Находит сработавшие алерты, шлёт письма и деактивирует их.
+        """Find fired alerts, send emails, and deactivate them.
 
-        Возвращает число отправленных уведомлений. Вызывается Celery-задачей;
-        commit — на стороне вызывающего.
+        Returns the number of sent notifications. Called by a Celery task;
+        the commit is done by the caller.
         """
         triggered = await self.alerts.list_triggered()
         sent = 0
         for row in triggered:
-            subject = f"Цена снизилась: {row.product_title}"
+            subject = f"Price dropped: {row.product_title}"
             body = (
-                f"Цена на товар «{row.product_title}» достигла вашего порога.\n\n"
-                f"Текущая минимальная цена: ${row.min_price_usd}\n"
-                f"Ваш порог: ${row.threshold_price_usd} "
-                f"(указан в {row.currency_code})\n"
+                f"The price of \"{row.product_title}\" reached your threshold.\n\n"
+                f"Current lowest price: ${row.min_price_usd}\n"
+                f"Your threshold: ${row.threshold_price_usd} "
+                f"(set in {row.currency_code})\n"
             )
             try:
                 await send_email(row.email, subject, body)
@@ -88,10 +88,10 @@ class AlertService:
         return sent
 
     async def _to_usd(self, amount: Decimal, currency: Currency) -> Decimal:
-        """Перевести пороговую цену из указанной валюты в USD.
+        """Convert the threshold price from the given currency to USD.
 
-        convert() идёт USD→валюта (price_other = price_usd * rate_usd / rate_other),
-        обратное преобразование: price_usd = price_other * rate_other / rate_usd.
+        convert() goes USD->currency (price_other = price_usd * rate_usd / rate_other),
+        so the reverse is: price_usd = price_other * rate_other / rate_usd.
         """
         if currency == Currency.USD:
             return amount

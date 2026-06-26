@@ -1,5 +1,5 @@
-"""Юнит/интеграционные тесты CurrencyService: конвертация через гривну, кеш,
-загрузка с НБУ on-demand, fallback и sync. БД — тестовый Postgres, НБУ замокан."""
+"""Integration tests for CurrencyService: conversion via the hryvnia, cache,
+on-demand load from NBU, fallback, and sync. DB is a test Postgres; NBU is mocked."""
 
 from datetime import date, timedelta
 from decimal import Decimal
@@ -43,13 +43,13 @@ async def test_get_rate_uses_cache(db):
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     today = date.today()
     await redis.set(f"exchange_rate:{Currency.USD}:{today}", "99.0")
-    # курс берётся из кеша, БД (где 44.8685) не трогается
+    # the rate comes from the cache; the DB (where it is 44.8685) is not touched
     assert await _service(db, redis).get_rate(Currency.USD, today) == Decimal("99.0")
 
 
 async def test_get_rate_fetches_from_nbu_when_missing(db, monkeypatch):
     svc = _service(db)
-    past = date.today() - timedelta(days=400)  # точно нет в seed
+    past = date.today() - timedelta(days=400)  # surely not in the seed
 
     async def fake_fetch(currency, for_date):
         return Decimal("38.5")
@@ -58,7 +58,7 @@ async def test_get_rate_fetches_from_nbu_when_missing(db, monkeypatch):
 
     rate = await svc.get_rate(Currency.USD, past)
     assert rate == Decimal("38.5")
-    # self-warming: курс осел в БД
+    # self-warming: the rate was stored in the DB
     assert await ExchangeRateRepo(db).get_rate(Currency.USD, past) == Decimal("38.5")
 
 
@@ -71,7 +71,7 @@ async def test_get_rate_falls_back_to_earlier_when_nbu_down(db, monkeypatch):
 
     monkeypatch.setattr(svc, "_fetch_from_nbu", nbu_down)
 
-    # НБУ молчит, точной даты нет → ближайший предыдущий (сегодняшний) курс
+    # NBU is silent, no exact date -> the nearest earlier (today's) rate
     assert await svc.get_rate(Currency.USD, future) == USD_RATE
 
 

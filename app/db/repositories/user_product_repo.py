@@ -8,7 +8,7 @@ from app.db.repositories.base import BaseRepository
 
 
 class UserProductRepo(BaseRepository):
-    """Доступ к таблице user_products (watchlist)."""
+    """Access to the user_products table (watchlist)."""
 
     async def list_product_ids(self, user_id: uuid.UUID) -> Sequence[uuid.UUID]:
         rows = (

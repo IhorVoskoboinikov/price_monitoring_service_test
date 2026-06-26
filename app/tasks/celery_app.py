@@ -19,7 +19,7 @@ app.conf.update(
 app.conf.beat_schedule = {
     "fetch-prices": {
         "task": "tasks.fetch_prices",
-        # каждые FETCH_PRICES_INTERVAL_HOURS часов (из .env, по умолчанию 4)
+        # every FETCH_PRICES_INTERVAL_HOURS hours (from .env, default 4)
         "schedule": settings.fetch_prices_interval_hours * 3600,
     },
     "check-price-alerts": {
@@ -28,12 +28,12 @@ app.conf.beat_schedule = {
     },
     "sync-exchange-rates": {
         "task": "tasks.sync_exchange_rates",
-        # ежедневно в SYNC_RATES_CRON_HOUR:00 UTC
+        # daily at SYNC_RATES_CRON_HOUR:00 UTC
         "schedule": crontab(hour=settings.sync_rates_cron_hour, minute=0),
     },
     "create-price-history-partition-monthly": {
         "task": "tasks.create_price_history_partition",
-        # 1-го числа каждого месяца в 00:05
+        # on the 1st day of every month at 00:05
         "schedule": crontab(day_of_month=1, hour=0, minute=5),
     },
 }

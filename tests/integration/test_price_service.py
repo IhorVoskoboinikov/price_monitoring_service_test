@@ -1,8 +1,8 @@
-"""Тесты PriceService на реальных данных истории: вычисление тренда
-(рост/падение vs среднее за 30 дней) и сборка истории цен по дням.
+"""Tests for PriceService on real history data: computing the trend
+(up/down vs the 30-day average) and building the price history by day.
 
-Валюта USD — конвертация при этом тождественна, поэтому тесты не зависят
-от курсов и не ходят в сеть."""
+Currency is USD, so conversion is identity here; the tests do not depend on
+rates and do not go to the network."""
 
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -57,21 +57,21 @@ async def _trend_of_product1(db) -> TrendDirection:
 
 
 async def test_trend_up_when_today_above_30d_avg(db):
-    # 30-дневное среднее низкое (5.00) → сегодняшние 12.99/15.99 выше → рост
+    # 30-day average is low (5.00) -> today's 12.99/15.99 are higher -> up
     ps_ids = await _product1_shop_ids(db)
     await _add_history(db, ps_ids, "5.00", days_ago=10)
     assert await _trend_of_product1(db) == TrendDirection.UP
 
 
 async def test_trend_down_when_today_below_30d_avg(db):
-    # 30-дневное среднее высокое (50.00) → сегодняшние цены ниже → падение
+    # 30-day average is high (50.00) -> today's prices are lower -> down
     ps_ids = await _product1_shop_ids(db)
     await _add_history(db, ps_ids, "50.00", days_ago=10)
     assert await _trend_of_product1(db) == TrendDirection.DOWN
 
 
 async def test_trend_same_without_history(db):
-    # истории за 30 дней нет (только сегодняшние записи) → SAME
+    # no 30-day history (only today's records) -> SAME
     assert await _trend_of_product1(db) == TrendDirection.SAME
 
 
@@ -86,13 +86,13 @@ async def test_price_history_groups_by_shop_and_day(db):
     )
 
     assert {s.shop_name for s in resp.series} == {"DummyJSON", "FakeStore"}
-    # два дня с данными: «3 дня назад» и сегодня
+    # two days with data: "3 days ago" and today
     assert len(resp.average) == 2
 
 
 async def _one_today_one_stale(db) -> None:
-    """Перенастраивает product 1: один магазин с ценой сегодня (12.99),
-    второй — только со старой ценой (999, 2 дня назад)."""
+    """Reconfigure product 1: one shop has a price today (12.99), the other
+    has only an old price (999, 2 days ago)."""
     ps_ids = await _product1_shop_ids(db)
     await db.execute(
         delete(PriceHistory).where(PriceHistory.product_shop_id.in_(ps_ids))
@@ -106,16 +106,16 @@ async def _one_today_one_stale(db) -> None:
 
 
 async def test_today_range_excludes_stale_shop(db):
-    # ТЗ: «диапазон цен на сегодня» — вчерашняя цена магазина не учитывается
+    # spec: "today's price range" — a shop's yesterday price is not counted
     await _one_today_one_stale(db)
     detail = await _service(db).get_product_detail(PRODUCT_1_ID, Currency.USD)
     assert detail.price_min == Decimal("12.99")
-    assert detail.price_max == Decimal("12.99")  # 999 (2 дня назад) не в диапазоне
-    assert detail.shops_count == 2  # магазин существует, просто без цены за сегодня
+    assert detail.price_max == Decimal("12.99")  # 999 (2 days ago) not in the range
+    assert detail.shops_count == 2  # the shop exists, it just has no price today
 
 
 async def test_current_prices_only_today(db):
-    # /prices: «список пар магазин-цена на сегодня» — устаревшие записи не выводятся
+    # /prices: "list of shop-price pairs for today" — stale records are not shown
     await _one_today_one_stale(db)
     prices = await _service(db).get_current_prices(PRODUCT_1_ID, Currency.USD)
     assert len(prices) == 1

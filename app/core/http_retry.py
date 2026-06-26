@@ -1,9 +1,9 @@
-"""Общий помощник для устойчивых HTTP-GET к внешним API (магазины, НБУ).
+"""Shared helper for robust HTTP GET to external APIs (shops, NBU).
 
-Внешние сервисы могут отвечать 429 (rate limit), 5xx или вовсе отваливаться по
-таймауту. Повторяем запрос с экспоненциальным backoff, число попыток — из
-настроек (`SHOP_API_RETRY_ATTEMPTS`). Логика вынесена сюда, чтобы не дублировать
-цикл ретраев в каждом адаптере и в CurrencyService.
+External services can answer with 429 (rate limit), 5xx, or just time out. We retry
+the request with exponential backoff; the number of tries comes from the settings
+(`SHOP_API_RETRY_ATTEMPTS`). The logic lives here so we do not repeat the retry loop
+in every adapter and in CurrencyService.
 """
 
 import asyncio
@@ -22,11 +22,11 @@ async def get_with_retry(
     attempts: int = 3,
     base_delay: float = 1.0,
 ) -> httpx.Response:
-    """GET с ретраями на 429, 5xx и transient-ошибках (таймаут, обрыв связи).
+    """GET with retries on 429, 5xx, and transient errors (timeout, dropped link).
 
-    Между попытками ждёт `base_delay * 2**(n-1)` секунд. Возвращает успешный
-    ответ (2xx/3xx/4xx кроме 429). После исчерпания попыток пробрасывает
-    `HTTPStatusError` (для 429/5xx) или последнюю transport-ошибку.
+    Between tries it waits `base_delay * 2**(n-1)` seconds. Returns a good response
+    (2xx/3xx/4xx except 429). When all tries are used up it raises `HTTPStatusError`
+    (for 429/5xx) or the last transport error.
     """
     last_response: httpx.Response | None = None
     last_exc: Exception | None = None
@@ -54,6 +54,6 @@ async def get_with_retry(
             await asyncio.sleep(base_delay * 2 ** (attempt - 1))
 
     if last_response is not None:
-        last_response.raise_for_status()  # 429/5xx → HTTPStatusError
+        last_response.raise_for_status()  # 429/5xx -> HTTPStatusError
         return last_response
-    raise last_exc  # type: ignore[misc]  # сюда попадаем только если был exc
+    raise last_exc  # type: ignore[misc]  # we get here only if there was an exc

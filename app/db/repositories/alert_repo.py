@@ -12,7 +12,7 @@ from app.db.repositories.price_repo import latest_price_subq
 
 
 class AlertRepo(BaseRepository):
-    """Доступ к таблице price_alerts."""
+    """Access to the price_alerts table."""
 
     async def list_by_user(self, user_id: uuid.UUID) -> Sequence[PriceAlert]:
         rows = (
@@ -28,7 +28,7 @@ class AlertRepo(BaseRepository):
         self.db.add(alert)
 
     async def delete(self, alert_id: uuid.UUID, user_id: uuid.UUID) -> int:
-        """Удаляет алерт пользователя. Возвращает число удалённых строк."""
+        """Delete a user's alert. Returns the number of deleted rows."""
         result = await self.db.execute(
             delete(PriceAlert).where(
                 PriceAlert.id == alert_id,
@@ -38,10 +38,10 @@ class AlertRepo(BaseRepository):
         return result.rowcount
 
     async def list_triggered(self) -> Sequence[Row]:
-        """Активные алерты, у которых минимальная текущая цена товара (USD)
-        опустилась до порога или ниже.
+        """Active alerts where the product's minimum current price (USD) has
+        dropped to the threshold or below.
 
-        Колонки: (id, email, product_title, threshold_price_usd, currency_code,
+        Columns: (id, email, product_title, threshold_price_usd, currency_code,
         min_price_usd).
         """
         latest = latest_price_subq()
@@ -74,7 +74,7 @@ class AlertRepo(BaseRepository):
         return (await self.db.execute(q)).all()
 
     async def deactivate(self, alert_id: uuid.UUID) -> None:
-        """Помечает алерт сработавшим: is_active=False, triggered_at=now()."""
+        """Mark the alert as fired: is_active=False, triggered_at=now()."""
         await self.db.execute(
             update(PriceAlert)
             .where(PriceAlert.id == alert_id)

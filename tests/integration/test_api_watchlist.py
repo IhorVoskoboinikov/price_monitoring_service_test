@@ -1,4 +1,4 @@
-"""API-тесты watchlist: добавление, список, удаление, конфликты."""
+"""API tests for the watchlist: add, list, remove, conflicts."""
 
 import uuid
 
@@ -6,7 +6,7 @@ from tests.conftest import PRODUCT_1_ID, PRODUCT_2_ID
 
 
 async def test_add_product_then_appears_in_list(auth_client):
-    # стартово отслеживается только product 1
+    # at the start only product 1 is watched
     assert (await auth_client.get("/api/v1/products")).json()["total"] == 1
 
     resp = await auth_client.post(
@@ -39,7 +39,7 @@ async def test_remove_tracked_product(auth_client):
 
 
 async def test_remove_not_tracked_returns_404(auth_client):
-    # product 2 не в watchlist
+    # product 2 is not in the watchlist
     resp = await auth_client.delete(f"/api/v1/me/products/{PRODUCT_2_ID}")
     assert resp.status_code == 404
 

@@ -1,5 +1,5 @@
-"""Юнит-тесты UserProductService: список отслеживаемого, добавление с
-проверками (404/409) и удаление (404). БД — тестовый Postgres."""
+"""Tests for UserProductService: list of watched products, add with
+checks (404/409), and remove (404). DB is a test Postgres."""
 
 import uuid
 
@@ -27,7 +27,7 @@ def _service(db) -> UserProductService:
 
 
 async def test_list_tracked_returns_details(db):
-    # demo-юзер отслеживает только product 1
+    # the demo user watches only product 1
     tracked = await _service(db).list_tracked(DEMO_USER_ID, Currency.USD)
     assert [d.id for d in tracked] == [PRODUCT_1_ID]
     assert tracked[0].title == "Test Product 1"
@@ -48,7 +48,7 @@ async def test_add_nonexistent_product_raises_not_found(db):
 
 async def test_add_duplicate_raises_conflict(db):
     with pytest.raises(ConflictError):
-        await _service(db).add(DEMO_USER_ID, PRODUCT_1_ID)  # уже в watchlist
+        await _service(db).add(DEMO_USER_ID, PRODUCT_1_ID)  # already in the watchlist
 
 
 async def test_remove_success(db):
@@ -60,4 +60,4 @@ async def test_remove_success(db):
 
 async def test_remove_not_tracked_raises_not_found(db):
     with pytest.raises(NotFoundError):
-        await _service(db).remove(DEMO_USER_ID, PRODUCT_2_ID)  # не отслеживается
+        await _service(db).remove(DEMO_USER_ID, PRODUCT_2_ID)  # not watched

@@ -11,12 +11,12 @@ from app.core.config import settings
 
 
 class DatabaseService:
-    """Общий engine приложения.
+    """Shared application engine.
 
-    FastAPI работает в одном event loop (uvicorn), поэтому переиспользует общий
-    пул соединений через `session()`. Для Celery-задач, где `asyncio.run()`
-    создаёт новый event loop на каждый вызов, общий engine использовать нельзя
-    (asyncpg-соединения привязаны к loop'у) — там применяется `begin_task_session()`.
+    FastAPI runs in a single event loop (uvicorn), so it reuses one shared
+    connection pool through `session()`. For Celery tasks, where `asyncio.run()`
+    makes a new event loop on each call, the shared engine cannot be used
+    (asyncpg connections are bound to a loop) — there we use `begin_task_session()`.
     """
 
     def __init__(self) -> None:
@@ -35,7 +35,7 @@ class DatabaseService:
 
     @asynccontextmanager
     async def session(self) -> AsyncGenerator[AsyncSession, None]:
-        """Сессия на общем engine приложения (один event loop)."""
+        """A session on the shared app engine (one event loop)."""
         async with self._session_factory() as session:
             yield session
 
@@ -48,11 +48,11 @@ db_service = DatabaseService()
 
 @asynccontextmanager
 async def begin_task_session() -> AsyncGenerator[AsyncSession, None]:
-    """Сессия с собственным engine на текущий event loop — для Celery-задач.
+    """A session with its own engine on the current event loop — for Celery tasks.
 
-    Каждый запуск задачи идёт через `asyncio.run()` (новый loop), поэтому
-    поднимаем изолированный engine и гарантированно закрываем его в конце,
-    чтобы не переиспользовать соединения из чужого/закрытого loop'а.
+    Each task run goes through `asyncio.run()` (a new loop), so we create an
+    isolated engine and always close it at the end, to avoid reusing connections
+    from another/closed loop.
     """
     engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
     try:

@@ -11,13 +11,13 @@ from app.db.repositories.price_repo import latest_price_subq, utc_today_start
 
 
 class ProductRepo(BaseRepository):
-    """Доступ к таблице products и агрегатам цен по товару."""
+    """Access to the products table and price aggregates per product."""
 
     async def list_watchlist_with_prices(self, user_id: uuid.UUID) -> Sequence[Row]:
-        """Товары из watchlist пользователя с min/max ценой и числом магазинов.
+        """User's watchlist products with min/max price and shop count.
 
-        Колонки: (id, title, category, price_min, price_max, shops_count).
-        Диапазон цен — по сегодняшним записям (ТЗ: «диапазон цен на сегодня»).
+        Columns: (id, title, category, price_min, price_max, shops_count).
+        The price range uses today's records (spec: "today's price range").
         """
         latest = latest_price_subq(utc_today_start())
         q = (
@@ -38,11 +38,11 @@ class ProductRepo(BaseRepository):
         return (await self.db.execute(q)).all()
 
     async def list_watchlist_details(self, user_id: uuid.UUID) -> Sequence[Row]:
-        """Карточки всех товаров watchlist пользователя одним запросом.
+        """Cards for all of the user's watchlist products in one query.
 
-        Колонки: (id, title, description, category, price_min, price_max,
-        shops_count). Диапазон цен — по сегодняшним записям. Используется вместо
-        N запросов get_detail на каждый товар.
+        Columns: (id, title, description, category, price_min, price_max,
+        shops_count). The price range uses today's records. Used instead of N
+        get_detail queries, one per product.
         """
         latest = latest_price_subq(utc_today_start())
         q = (
@@ -64,9 +64,9 @@ class ProductRepo(BaseRepository):
         return (await self.db.execute(q)).all()
 
     async def get_detail(self, product_id: uuid.UUID) -> Row | None:
-        """Карточка товара с агрегатами цен или None, если товара нет.
+        """Product card with price aggregates, or None if the product is missing.
 
-        Диапазон цен — по сегодняшним записям (ТЗ: «диапазон цен от и до»).
+        The price range uses today's records (spec: "price range from and to").
         """
         latest = latest_price_subq(utc_today_start())
         q = (

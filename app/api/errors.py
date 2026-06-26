@@ -1,7 +1,7 @@
-"""Регистрация обработчиков исключений на FastAPI-приложении.
+"""Register exception handlers on the FastAPI app.
 
-Доменные исключения сервисного слоя (app.core.exceptions) маппятся в HTTP-ответы
-здесь — сервисы остаются независимыми от веб-слоя.
+Domain exceptions from the service layer (app.core.exceptions) are mapped to HTTP
+responses here, so services stay independent from the web layer.
 """
 
 from fastapi import FastAPI, Request
@@ -11,10 +11,10 @@ from app.core.exceptions import AppError
 
 
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
-    """Доменное исключение → JSON-ответ с его HTTP-статусом."""
+    """Domain exception -> JSON response with its HTTP status."""
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    """Подключает обработчики исключений к приложению (вызывается из create_app)."""
+    """Add the exception handlers to the app (called from create_app)."""
     app.add_exception_handler(AppError, app_error_handler)

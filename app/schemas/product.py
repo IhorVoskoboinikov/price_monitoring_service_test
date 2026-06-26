@@ -43,6 +43,6 @@ class AddProductRequest(BaseModel):
 
 
 class WatchlistItem(BaseModel):
-    """Ответ на добавление товара в watchlist."""
+    """Response for adding a product to the watchlist."""
 
     product_id: uuid.UUID

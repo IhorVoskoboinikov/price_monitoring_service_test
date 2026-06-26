@@ -1,6 +1,6 @@
-"""Тест PriceFetcherService: снимает цены со всех активных магазинов через
-адаптеры (замокано), пишет в price_history только смапленные товары и
-не дублирует цену, снятую недавно (< 1 часа)."""
+"""Test for PriceFetcherService: takes prices from all active shops through
+adapters (mocked), writes to price_history only mapped products, and does not
+duplicate a price taken recently (< 1 hour)."""
 
 from decimal import Decimal
 
@@ -12,12 +12,12 @@ from app.db.repositories.shop_repo import ShopRepo
 from app.services.price_fetcher import PriceFetcherService
 from app.services.shop_adapters.base import ShopProduct
 
-# seed: dummyjson хранит external_id "1"(p1) и "2"(p2), fakestore — "101"(p1).
+# seed: dummyjson holds external_id "1"(p1) and "2"(p2), fakestore — "101"(p1).
 ADAPTERS = {
     "dummyjson": [
         ShopProduct("1", "P1", "", "c", Decimal("20.0")),
         ShopProduct("2", "P2", "", "c", Decimal("30.0")),
-        ShopProduct("999", "Ghost", "", "c", Decimal("1.0")),  # не смаплен → пропуск
+        ShopProduct("999", "Ghost", "", "c", Decimal("1.0")),  # not mapped -> skipped
     ],
     "fakestore": [
         ShopProduct("101", "P1", "", "c", Decimal("25.0")),
@@ -46,7 +46,7 @@ async def _count_prices(db) -> int:
 
 async def test_fetch_all_writes_prices_for_mapped_products(db, monkeypatch):
     _patch_adapters(monkeypatch)
-    # убираем свежие seed-цены, чтобы дедуп не сработал
+    # remove the fresh seed prices so dedup does not kick in
     await db.execute(delete(PriceHistory))
     await db.commit()
 
@@ -54,18 +54,18 @@ async def test_fetch_all_writes_prices_for_mapped_products(db, monkeypatch):
     results = await service.fetch_all()
     await db.commit()
 
-    assert results == {"dummyjson": 2, "fakestore": 1}  # "999" пропущен
+    assert results == {"dummyjson": 2, "fakestore": 1}  # "999" skipped
     assert await _count_prices(db) == 3
 
 
 async def test_fetch_all_dedupes_recent_prices(db, monkeypatch):
     _patch_adapters(monkeypatch)
-    # seed уже содержит цены, снятые сейчас → все попадают в окно дедупа
+    # the seed already has prices taken just now -> all fall into the dedup window
     before = await _count_prices(db)
 
     service = PriceFetcherService(ShopRepo(db), PriceRepo(db))
     results = await service.fetch_all()
     await db.commit()
 
-    assert results == {"dummyjson": 0, "fakestore": 0}  # ничего не дописано
+    assert results == {"dummyjson": 0, "fakestore": 0}  # nothing was added
     assert await _count_prices(db) == before

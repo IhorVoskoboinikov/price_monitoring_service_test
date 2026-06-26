@@ -46,7 +46,7 @@ class PriceService:
         self.prices = prices
         self.currency = currency
 
-    # ── Product list (watchlist пользователя) ─────────────────────────────
+    # ── Product list (user's watchlist) ───────────────────────────────────
 
     async def get_products_list(
         self,
@@ -111,7 +111,7 @@ class PriceService:
     async def get_watchlist_details(
         self, user_id: uuid.UUID, currency: Currency
     ) -> list[ProductDetail]:
-        """Карточки всех отслеживаемых товаров одним запросом (без N+1)."""
+        """Cards for all watched products in one query (no N+1)."""
         rows = await self.products.list_watchlist_details(user_id)
         return [
             ProductDetail(

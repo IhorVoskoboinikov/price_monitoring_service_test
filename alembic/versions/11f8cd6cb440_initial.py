@@ -102,8 +102,8 @@ def upgrade() -> None:
     op.create_index('ix_price_history_lookup', 'price_history', ['product_shop_id', 'recorded_at'], unique=False)
     # ### end Alembic commands ###
 
-    # Создаём начальные партиции price_history.
-    # Celery-задача create_monthly_partition_task создаёт следующие партиции 1-го числа каждого месяца.
+    # Create the first price_history partitions.
+    # The Celery task create_monthly_partition_task makes the next partitions on the 1st of each month.
     op.execute("""
         CREATE TABLE price_history_2026_06
             PARTITION OF price_history

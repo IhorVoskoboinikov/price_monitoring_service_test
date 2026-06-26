@@ -1,4 +1,4 @@
-"""API-тесты: список товаров, карточка, цены, история, конвертация валют."""
+"""API tests: product list, product card, prices, history, currency conversion."""
 
 import uuid
 from decimal import Decimal
@@ -12,7 +12,7 @@ async def test_products_list_returns_watchlist_only(auth_client):
     resp = await auth_client.get("/api/v1/products")
     assert resp.status_code == 200
     body = resp.json()
-    # demo-юзер отслеживает только product 1
+    # the demo user watches only product 1
     assert body["total"] == 1
     item = body["items"][0]
     assert item["id"] == str(PRODUCT_1_ID)

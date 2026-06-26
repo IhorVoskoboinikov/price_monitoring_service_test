@@ -1,13 +1,13 @@
-"""Доменные исключения приложения.
+"""Application domain exceptions.
 
-Сервисный слой не зависит от HTTP/FastAPI — он бросает эти исключения, а API-слой
-маппит их в ответы (см. обработчики в app/main.py). Так бизнес-логику можно
-переиспользовать вне веб-контекста (Celery-задачи, CLI, тесты).
+The service layer does not depend on HTTP/FastAPI: it raises these exceptions, and
+the API layer maps them to responses (see the handlers in app/main.py). This way the
+business logic can be reused outside the web context (Celery tasks, CLI, tests).
 """
 
 
 class AppError(Exception):
-    """Базовое доменное исключение. `status_code` использует API-слой для маппинга."""
+    """Base domain exception. The API layer uses `status_code` for mapping."""
 
     status_code: int = 400
     default_detail: str = "Application error"
@@ -18,14 +18,14 @@ class AppError(Exception):
 
 
 class NotFoundError(AppError):
-    """Запрашиваемый ресурс не найден."""
+    """The requested resource was not found."""
 
     status_code = 404
     default_detail = "Resource not found"
 
 
 class ConflictError(AppError):
-    """Конфликт состояния (например, дубликат)."""
+    """State conflict (for example, a duplicate)."""
 
     status_code = 409
     default_detail = "Conflict"

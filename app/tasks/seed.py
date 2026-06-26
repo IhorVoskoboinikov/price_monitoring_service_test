@@ -26,7 +26,7 @@ DEMO_USER_ID = uuid.UUID("10000000-0000-0000-0000-000000000001")
 
 
 async def seed_shops(db: AsyncSession) -> dict[str, int]:
-    """Создаёт записи магазинов. Возвращает {adapter_key: shop_id}."""
+    """Create shop records. Returns {adapter_key: shop_id}."""
     with log_operation(logger, "seed_shops"):
         shops = [
             Shop(name="DummyJSON", base_url=settings.dummyjson_url, adapter_key=DUMMYJSON_KEY, is_active=True),
@@ -35,7 +35,7 @@ async def seed_shops(db: AsyncSession) -> dict[str, int]:
         for shop in shops:
             db.add(shop)
 
-        await db.flush()  # получаем auto-increment id от БД
+        await db.flush()  # get the auto-increment id from the DB
         shop_ids = {s.adapter_key: s.id for s in shops}
         await db.commit()
 
@@ -45,9 +45,9 @@ async def seed_shops(db: AsyncSession) -> dict[str, int]:
 
 async def seed_products(db: AsyncSession, shop_ids: dict[str, int]) -> None:
     """
-    Загружает товары из DummyJSON и FakeStore.
-    Первые 20 товаров получают цены из обоих магазинов (маппинг по индексу).
-    Остальные ~174 — только из DummyJSON.
+    Load products from DummyJSON and FakeStore.
+    The first 20 products get prices from both shops (mapped by index).
+    The other ~174 come only from DummyJSON.
     """
     dummyjson_id = shop_ids[DUMMYJSON_KEY]
     fakestore_id = shop_ids[FAKESTORE_KEY]
@@ -62,8 +62,8 @@ async def seed_products(db: AsyncSession, shop_ids: dict[str, int]) -> None:
         logger.info(f"Fetched {len(fakestore_products)} products from FakeStore")
 
         for i, dummy in enumerate(dummy_products):
-            # UUID генерируем явно — default=uuid.uuid4 в модели применяется только
-            # при INSERT (flush), а не при создании Python-объекта
+            # Generate the UUID here — default=uuid.uuid4 in the model runs only
+            # on INSERT (flush), not when the Python object is created
             product_id = uuid.uuid4()
             product = Product(
                 id=product_id,
@@ -112,11 +112,11 @@ async def seed_demo_user(db: AsyncSession) -> None:
 
 
 async def run_seed_if_needed() -> None:
-    """Идемпотентный стартовый seed: demo-user, магазины, товары, курсы на сегодня.
+    """Idempotent startup seed: demo user, shops, products, today's rates.
 
-    Запускается из lifespan только в контейнере api (RUN_SEED_ON_STARTUP=true).
-    Каждый шаг проверяется независимо — устойчивость к частично выполненному seed.
-    Сбои внешних API не валят старт приложения (graceful degradation).
+    Runs from lifespan only in the api container (RUN_SEED_ON_STARTUP=true).
+    Each step is checked on its own — safe against a partly done seed.
+    External API failures do not break app startup (graceful degradation).
     """
     with log_operation(logger, "startup seed"):
         async with db_service.session() as db:
@@ -142,8 +142,8 @@ async def run_seed_if_needed() -> None:
             else:
                 logger.info(f"Products already exist ({products_count}), skipping")
 
-            # Курсы синхронизируем при каждом старте (идемпотентный upsert на сегодня),
-            # чтобы /currencies отдавал актуальное, не дожидаясь beat.
+            # Sync rates on every startup (idempotent upsert for today), so
+            # /currencies returns fresh data without waiting for beat.
             try:
                 currency_service = CurrencyService(ExchangeRateRepo(db), redis_client)
                 synced = await currency_service.sync_today_rates()

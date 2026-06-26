@@ -11,6 +11,6 @@ from app.core.logger import setup_logging
 from app.tasks.alerts import _check_alerts_async
 
 if __name__ == "__main__":
-    setup_logging()  # включаем INFO-логи (в т.ч. console-режим email)
+    setup_logging()  # turn on INFO logs (including console-mode email)
     sent = asyncio.run(_check_alerts_async())
     print(f"Alerts triggered & emailed: {sent}")

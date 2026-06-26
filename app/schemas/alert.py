@@ -9,7 +9,7 @@ from app.schemas.enums import Currency
 
 class AlertCreate(BaseModel):
     product_id: uuid.UUID
-    threshold_price: Decimal = Field(gt=0, description="Порог в указанной валюте")
+    threshold_price: Decimal = Field(gt=0, description="Threshold in chosen currency")
     currency: Currency = Currency.USD
 
     model_config = ConfigDict(extra="forbid")

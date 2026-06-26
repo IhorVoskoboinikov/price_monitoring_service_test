@@ -38,7 +38,7 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
-# Дом-стиль — datetime.timezone.utc (единообразно во всём коде), а не datetime.UTC.
+# House style — datetime.timezone.utc (used everywhere in the code), not datetime.UTC.
 ignore = ["UP017"]
 
 [tool.mypy]
