@@ -1,7 +1,6 @@
 # Architecture document
 ## Product price tracking service
 **Price Tracker Service — v1.0**
-*Test assignment: Middle+ / Senior Python Developer*
 
 ---
 
@@ -29,7 +28,7 @@ Price Tracker is a Python backend service that collects product prices from exte
 
 ### 1.1 Key requirements
 
-- A user registers with email + password (auth is out of scope of the assignment).
+- A user registers with email + password (auth is out of scope in this version).
 - A user builds a list of products to track.
 - The service periodically polls the APIs: `dummyjson.com/products` and `fakestoreapi.com/products`.
 - Prices are stored with history (unlimited in time).
@@ -77,7 +76,7 @@ Price Tracker is a Python backend service that collects product prices from exte
 
 ### 3.1 User
 
-A user of the system. Full auth is out of scope of the assignment — a static JWT is used (see section 12.4). The `password_hash` field is reserved for the future: in the current version registration/login are not implemented, so it is not filled.
+A user of the system. Full auth is out of scope in this version — a static JWT is used (see section 12.4). The `password_hash` field is reserved for the future: in the current version registration/login are not implemented, so it is not filled.
 
 | Field | Type / description |
 |---|---|
@@ -112,7 +111,7 @@ A product — a logical entity, not bound to a specific shop.
 | `description_source_shop_id` | INT, FK → `Shop.id`, nullable — which shop the description was taken from |
 | `created_at` | TIMESTAMPTZ |
 
-> **Choosing the description (the assignment requirement "the description can be taken from any API"):** one product can be present in several shops with different descriptions. The rule for the current version — the description is taken from the shop with the lowest `shop_id` priority (effectively the first shop where the product appeared during seed), and is fixed in `description_source_shop_id`. This makes the choice deterministic and transparent. If production needs a different priority (for example, the longest or the freshest description) — only the logic that fills this field changes, the schema does not.
+> **Choosing the description (the requirement "the description can be taken from any API"):** one product can be present in several shops with different descriptions. The rule for the current version — the description is taken from the shop with the lowest `shop_id` priority (effectively the first shop where the product appeared during seed), and is fixed in `description_source_shop_id`. This makes the choice deterministic and transparent. If production needs a different priority (for example, the longest or the freshest description) — only the logic that fills this field changes, the schema does not.
 
 ### 3.4 ProductShop
 
@@ -265,7 +264,7 @@ GET /api/v1/products/{product_id}/price-history
 | Response 200 | `{ series: [{ shop_name, data: [{ date, price }] }], average: [{ date, price }] }` |
 | Description | Data for the chart: a series per shop + the daily average price |
 
-> **The average over different history periods (the assignment requirement "price history in different shops can differ"):** shop A may have a price for January, while shop B has one only from March. The average for each day is computed **only over the shops that have a record on that day** — `average[date] = avg(prices of all shops that had a record on date)`. Days with no data for a shop are not counted as zero (that would distort the average), they are simply excluded from that day's computation. On the chart, a shop's line starts at its first record and ends at its last — the frontend does not connect gaps. Each point is converted into the chosen currency using the rate of its own date (see section 5.3).
+> **The average over different history periods (the requirement "price history in different shops can differ"):** shop A may have a price for January, while shop B has one only from March. The average for each day is computed **only over the shops that have a record on that day** — `average[date] = avg(prices of all shops that had a record on date)`. Days with no data for a shop are not counted as zero (that would distort the average), they are simply excluded from that day's computation. On the chart, a shop's line starts at its first record and ends at its last — the frontend does not connect gaps. Each point is converted into the chosen currency using the rate of its own date (see section 5.3).
 
 ### 4.5 User's product list
 
@@ -275,7 +274,7 @@ GET /api/v1/products/{product_id}/price-history
 | `POST /api/v1/me/products` | Body: `{ product_id }`. Add a product to the list |
 | `DELETE /api/v1/me/products/{product_id}` | Remove a product from tracking |
 
-> **How a user builds the tracking list.** The assignment states that the *way* the list is created "is omitted". The boundary is taken as follows: **the catalog is filled automatically** (seed + periodic price collection from DummyJSON and FakeStore, see 5.5/5.7), and the user **marks the products they want from the catalog** into their personal watchlist by `product_id`. The user does not add an arbitrary product by URL — they choose from products the system already knows (browse the catalog via `GET /api/v1/catalog`, see 4.7).
+> **How a user builds the tracking list.** The *way* the list is created is intentionally left open. The boundary is taken as follows: **the catalog is filled automatically** (seed + periodic price collection from DummyJSON and FakeStore, see 5.5/5.7), and the user **marks the products they want from the catalog** into their personal watchlist by `product_id`. The user does not add an arbitrary product by URL — they choose from products the system already knows (browse the catalog via `GET /api/v1/catalog`, see 4.7).
 >
 > Implementation: a many-to-many link `UserProduct(user_id, product_id)` (3.7). `POST /me/products` checks that the product exists (404 otherwise) and is not yet in the list (409 otherwise), and adds a row; `user_id` is taken from the JWT — the list is private. The product list page (4.1) already returns **only** the current user's watchlist (JOIN on `UserProduct`), not the whole catalog.
 
@@ -307,7 +306,7 @@ GET /api/v1/catalog
 | `GET /api/v1/currencies` | List of available currencies with the current rate |
 | `GET /api/v1/health` | App liveness probe (`{"status": "ok"}`) |
 
-> **Health check:** in the current version — a simple liveness probe that the process is up and responding (enough for the healthcheck in Docker Compose). A deep readiness check (DB, Redis, worker availability) is a direction for production monitoring; it is not required by the assignment.
+> **Health check:** in the current version — a simple liveness probe that the process is up and responding (enough for the healthcheck in Docker Compose). A deep readiness check (DB, Redis, worker availability) is a direction for production monitoring; it is out of scope in this version.
 
 ---
 
@@ -520,7 +519,7 @@ def determine_trend(avg_today: Decimal, avg_30d: Decimal) -> str:
 
 The list is a specific user's watchlist; it is small (a few to a few dozen products), and the trend and price range are computed fields (aggregates over several shops). So plain `OFFSET` pagination (`page` / `page_size`) is applied over the already-aggregated and in-memory-sorted result — the same for all sort kinds. This is simple and enough for watchlist sizes.
 
-> **Direction of growth (not required by the assignment):** if we were paging a global catalog (hundreds of thousands to millions of products) by an indexed field, then for `sort=price_*` it would make sense to switch to cursor pagination (`cursor=<last_id>`) to avoid the growing cost of `OFFSET` at large offsets. For a user's watchlist this is overkill.
+> **Direction of growth (out of scope in this version):** if we were paging a global catalog (hundreds of thousands to millions of products) by an indexed field, then for `sort=price_*` it would make sense to switch to cursor pagination (`cursor=<last_id>`) to avoid the growing cost of `OFFSET` at large offsets. For a user's watchlist this is overkill.
 
 ### 5.3 CurrencyService
 
@@ -597,14 +596,14 @@ This is done via an Alembic data migration or a seed script. No app restart is n
 
 Steps 1–3 (adapter, registry, DB row) are implemented and are enough for the new shop to start being polled by `fetch_all()`. To show its prices next to existing products, `ProductShop` links are needed.
 
-> **Direction of growth (not implemented, not required by the assignment):** a separate task `seed_new_shop_task(shop_id)` that, for production, matches the new shop's products to existing ones (fuzzy-matching by title, see 5.7) and creates `ProductShop`. Within the assignment, the initial mapping is done by the shared `seed_products()` by index on first run. The business logic, endpoints, and PriceService do not change when a shop is added.
+> **Direction of growth (not implemented, out of scope in this version):** a separate task `seed_new_shop_task(shop_id)` that, for production, matches the new shop's products to existing ones (fuzzy-matching by title, see 5.7) and creates `ProductShop`. In this version, the initial mapping is done by the shared `seed_products()` by index on first run. The business logic, endpoints, and PriceService do not change when a shop is added.
 
 ### 5.7 Mapping products between shops
 
-**The strategy for this assignment — mapping by nearest price at initialization.**
+**The strategy in this version — mapping by nearest price at initialization.**
 
-The DummyJSON and FakeStore catalogs barely overlap, which is why the assignment
-allows combining ids "arbitrarily". On first run `seed_products()` creates one
+The DummyJSON and FakeStore catalogs barely overlap, which is why combining ids
+"arbitrarily" is acceptable. On first run `seed_products()` creates one
 logical product per DummyJSON product, then attaches each FakeStore product as a
 second shop to the **closest-priced** DummyJSON product (1:1, each used once). This
 keeps the two shop prices of a two-shop product close — the range looks realistic
@@ -816,7 +815,7 @@ CREATE TABLE price_history_2025_06
 
 > **What is cached now:** currency rates — the "most expensive" data (an external call to the NBU). Reads go Redis → DB → NBU.
 >
-> **Direction of growth (not required by the assignment):** a cache of aggregated prices (`product_prices:{id}:{currency}`, TTL ~1h) and of the watchlist (`user_products:{user_id}`, TTL ~5min). At current volumes (a user's watchlist is small) these queries are cheap, so caching is deferred; TTLs for them are already reserved in the settings (`REDIS_TTL_PRODUCT_PRICES`, `REDIS_TTL_USER_PRODUCTS`).
+> **Direction of growth (out of scope in this version):** a cache of aggregated prices (`product_prices:{id}:{currency}`, TTL ~1h) and of the watchlist (`user_products:{user_id}`, TTL ~5min). At current volumes (a user's watchlist is small) these queries are cheap, so caching is deferred; TTLs for them are already reserved in the settings (`REDIS_TTL_PRODUCT_PRICES`, `REDIS_TTL_USER_PRODUCTS`).
 
 ### 7.3 Pagination
 
@@ -828,7 +827,7 @@ FastAPI + async SQLAlchemy + httpx provide non-blocking processing: while one re
 
 ### 7.5 Indexes and query optimization
 
-Per the assignment: products — up to millions, price history — over years. The main and most write-hot table is `price_history`. Indexes are chosen **for the specific queries from the repositories**, not "just in case", and with the write cost in mind.
+Target scale: products — up to millions, price history — over years. The main and most write-hot table is `price_history`. Indexes are chosen **for the specific queries from the repositories**, not "just in case", and with the write cost in mind.
 
 #### Principles
 
@@ -913,7 +912,7 @@ price_eur = price_usd * rate_usd / rate_eur
 - When a rate for any date is requested: Redis → PostgreSQL → if missing, a request to the NBU for that date (`?valcode=&date=`) + save to the DB → fallback to the nearest earlier rate. That is, **historical rates are pulled on-demand** as they are accessed (for example, when building price history).
 - A one-off bulk backfill of history over a period — by the script `scripts/sync_historical_rates.py [DAYS]` (`sync_historical_rates()`).
 
-> **Why not a bulk load of 5 years at startup:** it would slow down startup and would mostly load data that may never be needed. On-demand + the manual script cover the assignment requirement "fetch historical rates" without this cost. If needed, the preload is easy to move into a background task on first run.
+> **Why not a bulk load of 5 years at startup:** it would slow down startup and would mostly load data that may never be needed. On-demand + the manual script cover the requirement "fetch historical rates" without this cost. If needed, the preload is easy to move into a background task on first run.
 
 ---
 
@@ -1225,7 +1224,7 @@ async def get_products(
     return await service.get_products_list(user_id, currency, page, page_size, sort)
 ```
 
-> **Why no `exp`:** for the assignment a token expiry is not needed — the token is generated once and used for API testing. In production an `exp` and a refresh mechanism are added.
+> **Why no `exp`:** in this version a token expiry is not needed — the token is generated once and used for API testing. In production an `exp` and a refresh mechanism are added.
 
 ---
 
