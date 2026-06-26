@@ -1,17 +1,17 @@
 import uuid
-from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.enums import Currency, TrendDirection
+from app.schemas.types import Money
 
 
 class ProductListItem(BaseModel):
     id: uuid.UUID
     title: str
     category: str | None
-    price_min: Decimal | None
-    price_max: Decimal | None
+    price_min: Money | None
+    price_max: Money | None
     currency: Currency
     trend: TrendDirection
 
@@ -20,9 +20,9 @@ class ProductListItem(BaseModel):
 
 class ProductListResponse(BaseModel):
     items: list[ProductListItem]
-    page: int
-    page_size: int
-    total: int
+    page: int = Field(examples=[1])
+    page_size: int = Field(examples=[20])
+    total: int = Field(examples=[42])
 
 
 class ProductDetail(BaseModel):
@@ -30,8 +30,8 @@ class ProductDetail(BaseModel):
     title: str
     description: str | None
     category: str | None
-    price_min: Decimal | None
-    price_max: Decimal | None
+    price_min: Money | None
+    price_max: Money | None
     currency: Currency
     shops_count: int
 
@@ -44,8 +44,8 @@ class CatalogItem(BaseModel):
     id: uuid.UUID
     title: str
     category: str | None
-    price_min: Decimal | None
-    price_max: Decimal | None
+    price_min: Money | None
+    price_max: Money | None
     currency: Currency
     shops_count: int
 
@@ -54,9 +54,9 @@ class CatalogItem(BaseModel):
 
 class CatalogResponse(BaseModel):
     items: list[CatalogItem]
-    page: int
-    page_size: int
-    total: int
+    page: int = Field(examples=[1])
+    page_size: int = Field(examples=[20])
+    total: int = Field(examples=[42])
 
 
 class AddProductRequest(BaseModel):

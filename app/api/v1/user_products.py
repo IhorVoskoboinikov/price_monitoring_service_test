@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Query
 
 from app.api.deps import CurrentUserId, UserProductServiceDep
+from app.api.responses import CONFLICT, NOT_FOUND
 from app.schemas.enums import Currency
 from app.schemas.product import AddProductRequest, ProductDetail, WatchlistItem
 
@@ -19,7 +20,12 @@ async def get_user_products(
     return await service.list_tracked(user_id, currency)
 
 
-@router.post("", response_model=WatchlistItem, status_code=201)
+@router.post(
+    "",
+    response_model=WatchlistItem,
+    status_code=201,
+    responses={**NOT_FOUND, **CONFLICT},
+)
 async def add_user_product(
     body: AddProductRequest,
     user_id: CurrentUserId,
@@ -30,7 +36,7 @@ async def add_user_product(
     return WatchlistItem(product_id=body.product_id)
 
 
-@router.delete("/{product_id}", status_code=204)
+@router.delete("/{product_id}", status_code=204, responses=NOT_FOUND)
 async def remove_user_product(
     product_id: uuid.UUID,
     user_id: CurrentUserId,

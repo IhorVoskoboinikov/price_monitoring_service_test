@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter
 
 from app.api.deps import AlertServiceDep, CurrentUserId
+from app.api.responses import NOT_FOUND
 from app.schemas.alert import AlertCreate, AlertListResponse, AlertResponse
 
 router = APIRouter(prefix="/me/alerts", tags=["me"])
@@ -17,7 +18,7 @@ async def get_alerts(
     return AlertListResponse(items=items)
 
 
-@router.post("", response_model=AlertResponse, status_code=201)
+@router.post("", response_model=AlertResponse, status_code=201, responses=NOT_FOUND)
 async def create_alert(
     body: AlertCreate,
     user_id: CurrentUserId,
@@ -26,7 +27,7 @@ async def create_alert(
     return await service.create_alert(user_id, body)
 
 
-@router.delete("/{alert_id}", status_code=204)
+@router.delete("/{alert_id}", status_code=204, responses=NOT_FOUND)
 async def delete_alert(
     alert_id: uuid.UUID,
     user_id: CurrentUserId,

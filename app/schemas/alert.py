@@ -5,11 +5,14 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.enums import Currency
+from app.schemas.types import Money
 
 
 class AlertCreate(BaseModel):
     product_id: uuid.UUID
-    threshold_price: Decimal = Field(gt=0, description="Threshold in chosen currency")
+    threshold_price: Decimal = Field(
+        gt=0, examples=["12.99"], description="Threshold in chosen currency"
+    )
     currency: Currency = Currency.USD
 
     model_config = ConfigDict(extra="forbid")
@@ -18,7 +21,7 @@ class AlertCreate(BaseModel):
 class AlertResponse(BaseModel):
     id: uuid.UUID
     product_id: uuid.UUID
-    threshold_price_usd: Decimal | None
+    threshold_price_usd: Money | None
     currency_code: Currency | None
     is_active: bool
     created_at: datetime

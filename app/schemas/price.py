@@ -1,21 +1,21 @@
 from datetime import date, datetime
-from decimal import Decimal
 
 from pydantic import BaseModel
 
 from app.schemas.enums import Currency
+from app.schemas.types import Money
 
 
 class ShopPriceItem(BaseModel):
     shop_name: str
-    price: Decimal
+    price: Money
     currency: Currency
     last_updated: datetime
 
 
 class PriceHistoryPoint(BaseModel):
     date: date
-    price: Decimal
+    price: Money
 
 
 class PriceHistorySeries(BaseModel):
