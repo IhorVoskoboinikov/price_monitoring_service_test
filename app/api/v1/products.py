@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Query
 
 from app.api.deps import CurrentUser, CurrentUserId, PriceServiceDep
+from app.api.responses import NOT_FOUND
 from app.schemas.enums import Currency, SortOption
 from app.schemas.price import PriceHistoryResponse, ShopPriceItem
 from app.schemas.product import ProductDetail, ProductListResponse
@@ -23,7 +24,7 @@ async def get_products(
     return await service.get_products_list(user_id, currency, page, page_size, sort)
 
 
-@router.get("/{product_id}", response_model=ProductDetail)
+@router.get("/{product_id}", response_model=ProductDetail, responses=NOT_FOUND)
 async def get_product(
     product_id: uuid.UUID,
     _: CurrentUser,
@@ -33,7 +34,11 @@ async def get_product(
     return await service.get_product_detail(product_id, currency)
 
 
-@router.get("/{product_id}/prices", response_model=list[ShopPriceItem])
+@router.get(
+    "/{product_id}/prices",
+    response_model=list[ShopPriceItem],
+    responses=NOT_FOUND,
+)
 async def get_product_prices(
     product_id: uuid.UUID,
     _: CurrentUser,
