@@ -150,8 +150,33 @@ For `integration`/the full suite you need a running Docker.
 ```bash
 uv sync                      # install dependencies (including dev)
 uv run ruff check app/       # lint
-uv run alembic upgrade head  # migrations
 ```
+
+### Migrations
+
+In normal use you do **not** run migrations by hand: the `migrate` container
+runs `alembic upgrade head` automatically on every `docker compose up` (the
+`api`/`worker` wait for it via `service_completed_successfully`). So a fresh
+`docker compose up -d --build` already brings the schema to the latest revision.
+
+To run Alembic **locally** (from your venv, e.g. to create a new migration),
+there is one catch: `.env` points `DATABASE_URL` at the `@postgres` host, which
+only resolves inside the Docker network. From the host you must point it at
+`@localhost:5432` (the port is published in docker-compose). Don't edit `.env`
+for this — the containers need `@postgres`; just override the variable for the
+command:
+
+```bash
+# the postgres container must be running: docker compose up -d postgres
+export LOCAL_DB='postgresql+asyncpg://postgres:postgres@localhost:5432/price_tracker'
+
+DATABASE_URL=$LOCAL_DB uv run alembic upgrade head                    # apply migrations
+DATABASE_URL=$LOCAL_DB uv run alembic current                        # show current revision
+DATABASE_URL=$LOCAL_DB uv run alembic revision --autogenerate -m "…" # create a new migration
+```
+
+If you see `Temporary failure in name resolution`, it means `DATABASE_URL`
+still points at `@postgres` — use the `@localhost` override above.
 
 ## Configuration
 
