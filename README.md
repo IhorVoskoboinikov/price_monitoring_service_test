@@ -11,6 +11,7 @@ description is in [`price_tracker_architecture.md`](price_tracker_architecture.m
 
 - List of watched products with a price range and a trend (up/down/same vs the
   30-day average), sorted by price and by trend.
+- Catalog browse (all products, paginated) to discover a `product_id` to track.
 - Product card: description, price range, number of shops.
 - All shop prices for today and a daily price history (one series per shop +
   the average), with each point converted using the rate of its own date.
@@ -92,6 +93,7 @@ curl -H "Authorization: Bearer <token>" http://localhost:8000/api/v1/products
 
 | Method + URL | Purpose |
 |---|---|
+| `GET /api/v1/catalog?currency=&page=&page_size=` | Browse the whole catalog (find a `product_id` to track) |
 | `GET /api/v1/products?currency=&sort=` | List of watched products with a trend |
 | `GET /api/v1/products/{id}?currency=` | Product card |
 | `GET /api/v1/products/{id}/prices` | Shop prices for today |
@@ -186,9 +188,11 @@ real `.env` is in `.gitignore` and does not get into the repository.
 
 ## Notes on decisions
 
-- **Mapping products between shops** — by index at seed time (the first ~20
-  products get prices from two shops). In production this is replaced by
-  fuzzy-matching without changing the DB schema.
+- **Mapping products between shops** — at seed time each FakeStore product is
+  attached as a second shop to the closest-priced DummyJSON product (so the ~20
+  two-shop products keep realistic price ranges, not random pairs). The
+  catalogs barely overlap, so this is a demo mapping; in production it is
+  replaced by fuzzy-matching by title without changing the DB schema.
 - **Price dedup** — a repeated price snapshot for a product within 1 hour is not
   written.
 - **Historical 5-year rate load** — moved to a script

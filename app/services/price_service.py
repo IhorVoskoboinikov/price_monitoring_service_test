@@ -14,7 +14,13 @@ from app.schemas.price import (
     PriceHistorySeries,
     ShopPriceItem,
 )
-from app.schemas.product import ProductDetail, ProductListItem, ProductListResponse
+from app.schemas.product import (
+    CatalogItem,
+    CatalogResponse,
+    ProductDetail,
+    ProductListItem,
+    ProductListResponse,
+)
 from app.services.currency_service import CurrencyService
 
 logger = get_logger(__name__)
@@ -86,6 +92,33 @@ class PriceService:
             page=page,
             page_size=page_size,
             total=total,
+        )
+
+    # ── Catalog (all products, for discovery) ─────────────────────────────
+
+    async def get_catalog(
+        self, currency: Currency, page: int, page_size: int
+    ) -> CatalogResponse:
+        """One page of the whole catalog so a user can find products to track."""
+        offset = (page - 1) * page_size
+        rows = await self.products.list_catalog(page_size, offset)
+        total = await self.products.count_all()
+
+        items: list[CatalogItem] = []
+        for row in rows:
+            items.append(
+                CatalogItem(
+                    id=row.id,
+                    title=row.title,
+                    category=row.category,
+                    price_min=await self._convert_opt(row.price_min, currency),
+                    price_max=await self._convert_opt(row.price_max, currency),
+                    currency=currency,
+                    shops_count=row.shops_count,
+                )
+            )
+        return CatalogResponse(
+            items=items, page=page, page_size=page_size, total=total
         )
 
     # ── Product detail ────────────────────────────────────────────────────

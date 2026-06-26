@@ -38,6 +38,27 @@ class ProductDetail(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CatalogItem(BaseModel):
+    """One product in the global catalog (lean — no description)."""
+
+    id: uuid.UUID
+    title: str
+    category: str | None
+    price_min: Decimal | None
+    price_max: Decimal | None
+    currency: Currency
+    shops_count: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CatalogResponse(BaseModel):
+    items: list[CatalogItem]
+    page: int
+    page_size: int
+    total: int
+
+
 class AddProductRequest(BaseModel):
     product_id: uuid.UUID
 

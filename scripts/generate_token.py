@@ -29,11 +29,13 @@ _ALGORITHM = "HS256"
 # Fixed demo user — seeded by app/tasks/seed.py on first startup
 DEMO_USER_ID = "10000000-0000-0000-0000-000000000001"
 
+
+def make_token(secret: str | None = None) -> str:
+    """Build a `Bearer <jwt>` string for the demo user."""
+    secret = secret or os.environ["APP_SECRET_KEY"]
+    payload = {"sub": "admin", "role": "admin", "user_id": DEMO_USER_ID}
+    return f"Bearer {jwt.encode(payload, secret, algorithm=_ALGORITHM)}"
+
+
 if __name__ == "__main__":
-    payload = {
-        "sub": "admin",
-        "role": "admin",
-        "user_id": DEMO_USER_ID,
-    }
-    token = jwt.encode(payload, os.environ["APP_SECRET_KEY"], algorithm=_ALGORITHM)
-    print(f"Bearer {token}")
+    print(make_token())
