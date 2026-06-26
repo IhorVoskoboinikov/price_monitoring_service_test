@@ -2,8 +2,8 @@ from enum import StrEnum
 
 
 class Currency(StrEnum):
-    """Поддерживаемые валюты. StrEnum: член == своя строка ('USD'), поэтому
-    значение прозрачно подставляется в URL НБУ, ключи Redis и сравнения."""
+    """Supported currencies. StrEnum: a member equals its own string ('USD'), so
+    the value drops straight into NBU URLs, Redis keys, and comparisons."""
 
     USD = "USD"
     UAH = "UAH"
@@ -12,7 +12,7 @@ class Currency(StrEnum):
 
 
 class TrendDirection(StrEnum):
-    """Тренд цены: средняя за сегодня против средней за предыдущие 30 дней."""
+    """Price trend: today's average against the average of the previous 30 days."""
 
     UP = "up"
     DOWN = "down"
@@ -20,7 +20,7 @@ class TrendDirection(StrEnum):
 
 
 class SortOption(StrEnum):
-    """Сортировка списка товаров."""
+    """Sort order for the product list."""
 
     PRICE_ASC = "price_asc"
     PRICE_DESC = "price_desc"

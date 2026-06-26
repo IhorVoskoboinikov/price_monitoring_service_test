@@ -14,23 +14,23 @@ from app.schemas.enums import Currency
 
 logger = get_logger(__name__)
 
-# Валюты для синхронизации с НБУ (UAH — опорная, её курс к себе = 1).
+# Currencies to sync from NBU (UAH is the base; its rate to itself = 1).
 SYNC_CURRENCIES = [Currency.USD, Currency.EUR, Currency.GBP]
 
-# Денежная точность результата конвертации — единообразно 4 знака.
+# Money precision of the conversion result — always 4 digits.
 _MONEY = Decimal("0.0001")
 
-# Ожидаемые сбои при обращении к НБУ: сеть/HTTP, битый JSON, неполный ответ,
-# нечисловой курс. Ловим именно их (graceful degradation), а не любой Exception —
-# чтобы баги кода (AttributeError, NameError и т.п.) не маскировались.
+# Expected failures when calling NBU: network/HTTP, broken JSON, partial answer,
+# non-numeric rate. We catch only these (graceful degradation), not every Exception,
+# so code bugs (AttributeError, NameError, etc.) are not hidden.
 _NBU_FETCH_ERRORS = (httpx.HTTPError, ValueError, KeyError, TypeError, ArithmeticError)
 
 
 class CurrencyService:
-    """Конвертация валют и доступ к курсам НБУ.
+    """Currency conversion and access to NBU rates.
 
-    Чтение курсов идёт через инжектируемый репозиторий (общая сессия запроса):
-    Redis → БД → НБУ API. Сервис не открывает собственные сессии.
+    Rates are read through an injected repository (the shared request session):
+    Redis -> DB -> NBU API. The service does not open its own sessions.
     """
 
     def __init__(self, rates: ExchangeRateRepo, redis: aioredis.Redis) -> None:
@@ -45,11 +45,11 @@ class CurrencyService:
         to_currency: Currency,
         for_date: date | None = None,
     ) -> Decimal:
-        """Конвертирует сумму из USD в нужную валюту.
+        """Convert an amount from USD to the wanted currency.
 
-        Все конвертации идут через гривну как промежуточную:
-            USD → UAH :  price_usd * rate_usd
-            USD → EUR :  price_usd * rate_usd / rate_eur
+        Every conversion goes through the hryvnia as a middle step:
+            USD -> UAH :  price_usd * rate_usd
+            USD -> EUR :  price_usd * rate_usd / rate_eur
         """
         if to_currency == Currency.USD:
             return amount_usd.quantize(_MONEY)
@@ -64,10 +64,10 @@ class CurrencyService:
         return (amount_usd * rate_usd / rate_target).quantize(_MONEY)
 
     async def get_rate(self, currency: Currency, for_date: date) -> Decimal:
-        """Курс (гривен за 1 единицу валюты). Redis → БД → НБУ API.
+        """Rate (hryvnias per 1 unit of currency). Redis -> DB -> NBU API.
 
-        UAH — опорная валюта: 1 гривна за 1 гривну. Её нет ни в БД, ни в ответе
-        НБУ, поэтому возвращаем 1 напрямую.
+        UAH is the base currency: 1 hryvnia per 1 hryvnia. It is not in the DB or in
+        the NBU answer, so we return 1 directly.
         """
         if currency == Currency.UAH:
             return Decimal(1)
@@ -78,20 +78,20 @@ class CurrencyService:
         if cached:
             return Decimal(cached)
 
-        # 1. Точная дата в БД
+        # 1. Exact date in the DB
         rate = await self._rates.get_rate(currency, for_date)
         if rate is not None:
             await self._cache(cache_key, rate, for_date)
             return rate
 
-        # 2. НБУ on-demand (НБУ отдаёт курс и на выходные) + self-warming в БД
+        # 2. NBU on-demand (NBU also gives a rate on weekends) + self-warming into DB
         rate = await self._fetch_from_nbu(currency, for_date)
         if rate is not None:
             await self._rates.upsert(currency, for_date, rate)
             await self._cache(cache_key, rate, for_date)
             return rate
 
-        # 3. Fallback: ближайший предыдущий курс из БД (НБУ недоступен)
+        # 3. Fallback: nearest earlier rate from the DB (NBU is down)
         rate = await self._rates.get_rate_on_or_before(currency, for_date)
         if rate is not None:
             logger.warning(
@@ -104,15 +104,15 @@ class CurrencyService:
         raise ValueError(f"Exchange rate for {currency} on {for_date} not available")
 
     async def get_today_rates(self) -> Sequence[ExchangeRate]:
-        """Сегодняшние курсы всех поддерживаемых валют из БД."""
+        """Today's rates for all supported currencies from the DB."""
         return await self._rates.list_for_date(date.today())
 
     # ── Sync (Celery / startup / on-demand) ───────────────────────────────
 
     async def sync_today_rates(self) -> int:
-        """Загружает сегодняшние курсы всех валют с НБУ (bulk-запрос) в БД.
+        """Load today's rates for all currencies from NBU (bulk request) into the DB.
 
-        Идемпотентно (upsert). Возвращает число обновлённых валют.
+        Idempotent (upsert). Returns the number of updated currencies.
         """
         today = date.today()
         rates = await self._fetch_all_today_from_nbu()
@@ -130,9 +130,9 @@ class CurrencyService:
         return synced
 
     async def sync_historical_rates(self, date_from: date, date_to: date) -> int:
-        """Догружает исторические курсы за диапазон (по дням, идемпотентно).
+        """Load historical rates for a date range (day by day, idempotent).
 
-        Пропускает даты, уже имеющиеся в БД. Возвращает число записанных строк.
+        Skips dates already present in the DB. Returns the number of written rows.
         """
         written = 0
         current = date_from
@@ -153,7 +153,7 @@ class CurrencyService:
     # ── Internals ─────────────────────────────────────────────────────────
 
     async def _fetch_all_today_from_nbu(self) -> dict[str, Decimal]:
-        """Сегодняшние курсы всех валют одним запросом к НБУ: {cc: rate}."""
+        """Today's rates for all currencies in one NBU request: {cc: rate}."""
         try:
             async with httpx.AsyncClient(timeout=settings.shop_api_timeout) as client:
                 resp = await get_with_retry(
@@ -182,7 +182,7 @@ class CurrencyService:
         return None
 
     async def _cache(self, key: str, rate: Decimal, for_date: date) -> None:
-        # Текущий курс кешируем с TTL, исторический — бессрочно (он не меняется).
+        # Cache today's rate with a TTL; a historical one forever (it does not change).
         ttl = settings.redis_ttl_exchange_rate if for_date == date.today() else None
         if ttl:
             await self._redis.set(key, str(rate), ex=ttl)

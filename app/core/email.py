@@ -9,15 +9,15 @@ logger = get_logger(__name__)
 
 
 async def send_email(to: str, subject: str, body: str) -> None:
-    """Отправляет письмо через SMTP (async).
+    """Send an email over SMTP (async).
 
-    Если email_enabled=false — console-режим: письмо логируется, не отправляется.
-    Это позволяет запускать проект без реального SMTP. Для порта 587 используется
-    STARTTLS (smtp_use_tls=true) — стандарт Gmail/Mailtrap.
+    If email_enabled=false, this is console mode: the email is logged, not sent.
+    This lets you run the project without real SMTP. Port 587 uses STARTTLS
+    (smtp_use_tls=true), which is the Gmail/Mailtrap standard.
     """
     if not settings.email_enabled:
         logger.info(
-            "[EMAIL:console] (отправка отключена, EMAIL_ENABLED=false)\n"
+            "[EMAIL:console] (sending is off, EMAIL_ENABLED=false)\n"
             f"  To: {to}\n  Subject: {subject}\n  Body:\n{body}"
         )
         return

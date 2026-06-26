@@ -283,7 +283,8 @@ GET /api/v1/products/{product_id}/price-history
 > наполняется автоматически** (seed + периодический сбор цен из DummyJSON и
 > FakeStore, см. 5.5/5.7), а пользователь **помечает нужные товары из каталога**
 > в свой персональный watchlist по `product_id`. Пользователь не заводит
-> произвольный товар по URL — он выбирает из уже известных системе.
+> произвольный товар по URL — он выбирает из уже известных системе (обзор
+> каталога — `GET /api/v1/catalog`, см. 4.7).
 >
 > Реализация: связь many-to-many `UserProduct(user_id, product_id)` (3.7).
 > `POST /me/products` проверяет, что товар существует (иначе 404) и ещё не
@@ -299,7 +300,20 @@ GET /api/v1/products/{product_id}/price-history
 | `POST /api/v1/me/alerts` | Body: `{ product_id, threshold_price, currency }`. Создать алерт |
 | `DELETE /api/v1/me/alerts/{alert_id}` | Удалить алерт |
 
-### 4.7 Служебные эндпоинты
+### 4.7 Каталог — обзор всех товаров
+
+```
+GET /api/v1/catalog
+```
+
+| Параметр | Описание |
+|---|---|
+| Query params | `currency=USD`, пагинация `page` / `page_size` |
+| Ответ 200 | `{ items: [CatalogItem], page, page_size, total }` |
+| `CatalogItem` | `id, title, category, price_min, price_max, currency, shops_count` |
+| Назначение | Обзор **всего** каталога (а не watchlist), чтобы пользователь нашёл `product_id` для добавления в отслеживание (см. 4.5). Пагинация и `ORDER BY` — на стороне БД, поэтому масштабируется на большой каталог (в отличие от watchlist-листинга в памяти, см. 5.2). |
+
+### 4.8 Служебные эндпоинты
 
 | Метод + URL | Описание |
 |---|---|
@@ -421,13 +435,12 @@ class ShopProduct:
 
 ```python
 class BaseShopAdapter(ABC):
+    def __init__(self, base_url: str) -> None:
+        self.base_url = base_url
+
     @abstractmethod
     async def fetch_products(self) -> list[ShopProduct]:
         """Вернуть список товаров с ценами."""
-
-    @abstractmethod
-    async def fetch_product(self, external_id: str) -> ShopProduct | None:
-        """Вернуть один товар по ID."""
 
 
 class FakeStoreAdapter(BaseShopAdapter):
@@ -582,14 +595,6 @@ class NewShopAdapter(BaseShopAdapter):
             ShopProduct(external_id=str(p["id"]), title=p["name"], price_usd=p["price"])
             for p in resp.json()
         ]
-
-    async def fetch_product(self, external_id: str) -> ShopProduct | None:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"https://newshop.com/api/products/{external_id}")
-        if resp.status_code == 404:
-            return None
-        p = resp.json()
-        return ShopProduct(external_id=str(p["id"]), title=p["name"], price_usd=p["price"])
 ```
 
 **Шаг 2 — Зарегистрировать в реестре**
@@ -627,50 +632,56 @@ VALUES ('NewShop', 'https://newshop.com/api', 'newshop', true);
 
 ### 5.7 Маппинг товаров между магазинами
 
-**Стратегия для данного ТЗ — маппинг по индексу при инициализации.**
+**Стратегия для данного ТЗ — маппинг по близости цены при инициализации.**
 
-При первом запуске выполняется `seed_products()`, который загружает товары из всех магазинов и совмещает их по позиции в списке. Это соответствует условию ТЗ: *"можно совмещать id из разных API произвольным образом"*.
+Каталоги DummyJSON и FakeStore почти не пересекаются по товарам, поэтому ТЗ и
+разрешает совмещать id «произвольным образом». При первом запуске
+`seed_products()` создаёт по логическому товару на каждый товар DummyJSON, а затем
+привязывает каждый товар FakeStore вторым магазином к **ближайшему по цене** товару
+DummyJSON (1:1, каждый используется один раз). Так у двухмагазинных товаров цены
+двух магазинов остаются близкими — диапазон цен выглядит реалистично, а не как
+случайная пара (кровать $1899 ↔ рюкзак $109, как было бы при маппинге по индексу).
 
 ```python
 # app/tasks/seed.py
-async def seed_products(db: AsyncSession) -> None:
-    dummy_products     = await DummyJsonAdapter().fetch_products()   # ~194 товара (с пагинацией)
-    fakestore_products = await FakeStoreAdapter().fetch_products()   # 20 товаров
+def _map_by_nearest_price(dummy_products, fakestore_products) -> dict[int, ShopProduct]:
+    """Каждый товар FakeStore → ближайший по цене товар DummyJSON (жадно, 1:1)."""
+    mapping, used = {}, set()
+    for fakestore in fakestore_products:
+        best_idx, best_gap = None, None
+        for i, dummy in enumerate(dummy_products):
+            if i in used:
+                continue
+            gap = abs(dummy.price_usd - fakestore.price_usd)
+            if best_gap is None or gap < best_gap:
+                best_idx, best_gap = i, gap
+        if best_idx is None:
+            break
+        used.add(best_idx)
+        mapping[best_idx] = fakestore
+    return mapping
 
-    for i, dummy in enumerate(dummy_products):
-        # Создаём единую логическую сущность товара.
-        # Описание берём из DummyJSON и фиксируем источник (см. раздел 3.3)
-        product = Product(
-            title=dummy.title,
-            description=dummy.description,
-            category=dummy.category,
-            description_source_shop_id=DUMMYJSON_SHOP_ID,
-        )
-        db.add(product)
 
-        # Привязываем к DummyJSON — есть всегда
-        db.add(ProductShop(
-            product=product,
-            shop_id=DUMMYJSON_SHOP_ID,
-            external_id=dummy.external_id,
-        ))
+async def seed_products(db: AsyncSession, shop_ids) -> None:
+    dummy_products     = await DummyJsonAdapter(...).fetch_products()   # ~194 товара
+    fakestore_products = await FakeStoreAdapter(...).fetch_products()   # 20 товаров
 
-        # Привязываем к FakeStore — если есть товар с тем же индексом
-        if i < len(fakestore_products):
-            db.add(ProductShop(
-                product=product,
-                shop_id=FAKESTORE_SHOP_ID,
-                external_id=fakestore_products[i].external_id,
-            ))
+    product_ids = []
+    for dummy in dummy_products:                 # каждый DummyJSON-товар = логический товар
+        pid = uuid.uuid4(); product_ids.append(pid)
+        db.add(Product(id=pid, title=dummy.title, description=dummy.description,
+                       category=dummy.category, description_source_shop_id=dummyjson_id))
+        db.add(ProductShop(product_id=pid, shop_id=dummyjson_id, external_id=dummy.external_id))
 
+    for idx, fs in _map_by_nearest_price(dummy_products, fakestore_products).items():
+        db.add(ProductShop(product_id=product_ids[idx], shop_id=fakestore_id,
+                           external_id=fs.external_id))
     await db.commit()
 ```
 
-**Результат:** первые 20 товаров (по индексу) получают цены из двух магазинов — DummyJSON и FakeStore, остальные ~174 товара DummyJSON — только из одного магазина. Этого достаточно для демонстрации всех фич: диапазона цен, истории по магазинам и графика.
+**Результат:** 20 товаров FakeStore цепляются к ближайшим по цене товарам DummyJSON и получают цены из двух магазинов, остальные ~174 — из одного. Цены двух магазинов у таких товаров близки (на демо худший разрыв ~$100, у большинства <$12). Этого достаточно для демонстрации всех фич: диапазона цен, истории по магазинам и графика.
 
-**Идемпотентность:** перед вставкой проверяется существование `ProductShop` по `(shop_id, external_id)` — повторный запуск seed не создаёт дублей.
-
-> **Путь эволюции в production:** при росте числа магазинов маппинг по индексу заменяется на `ProductMatcherService` с fuzzy-matching по title (`rapidfuzz`) и дополнительными сигналами (категория, ценовая близость). Структура БД при этом не меняется — только логика заполнения `ProductShop`.
+> **Путь эволюции в production:** при росте числа магазинов маппинг по цене заменяется на `ProductMatcherService` с fuzzy-matching по title (`rapidfuzz`) и дополнительными сигналами (категория, ценовая близость). Структура БД при этом не меняется — только логика заполнения `ProductShop`.
 
 ### 5.8 Lifespan — автоматический запуск seed
 
@@ -730,7 +741,7 @@ async def run_seed_if_needed() -> None:
 | `fetch_prices_task` | Каждые N часов (из `.env`) | Опрос всех активных магазинов, запись `PriceHistory` |
 | `sync_exchange_rates_task` | Ежедневно в 08:00 UTC | Загрузка курсов НБУ на сегодня |
 | `check_price_alerts_task` | Каждые N минут (из `.env`) | Проверка активных алертов, отправка email |
-| `create_monthly_partition_task` | 1-го числа каждого месяца | Создание новой партиции таблицы `PriceHistory` |
+| `create_price_history_partition_task` | 1-го числа каждого месяца | Создание новой партиции таблицы `PriceHistory` |
 
 > **Интервал опроса магазинов (4 часа)** — баланс между актуальностью данных и нагрузкой на внешние API. Настраивается через `FETCH_PRICES_INTERVAL_HOURS` в `.env`.
 
@@ -864,7 +875,7 @@ offset-пагинация (`page` / `page_size`) — см. 5.2. Курсорна
 
 ### 7.4 Async I/O
 
-FastAPI + async SQLAlchemy + httpx обеспечивают неблокирующую обработку. При опросе нескольких магазинов одновременно используется `asyncio.gather()` для параллельных запросов.
+FastAPI + async SQLAlchemy + httpx обеспечивают неблокирующую обработку: пока один запрос ждёт I/O (БД, Redis, внешний API), event loop обслуживает другие. Сейчас `fetch_all()` опрашивает магазины **последовательно** (их единицы — этого достаточно). Путь развития при росте числа магазинов — параллельный опрос через `asyncio.gather()`.
 
 ### 7.5 Индексы и оптимизация запросов
 
@@ -1000,6 +1011,7 @@ price_tracker/
 │   │   ├── deps.py                # DI: сессия БД, провайдеры сервисов, auth
 │   │   ├── errors.py              # register_exception_handlers (доменные → HTTP)
 │   │   └── v1/
+│   │       ├── catalog.py         # GET /catalog (обзор всех товаров)
 │   │       ├── products.py        # /products, /{id}, /{id}/prices, /{id}/price-history
 │   │       ├── user_products.py   # GET/POST/DELETE /me/products (watchlist)
 │   │       ├── alerts.py          # CRUD /me/alerts
@@ -1065,7 +1077,7 @@ price_tracker/
 | Вопрос | Текущее решение / статус |
 |---|---|
 | Дедупликация алертов | Алерт деактивируется после первого срабатывания. Нужно уточнить: повторно активировать автоматически или только вручную? |
-| Маппинг товаров между магазинами | Маппинг по индексу при инициализации (`seed_products`). Первые 20 товаров получают цены из двух магазинов, остальные — только из DummyJSON. В production заменяется на fuzzy-matching. |
+| Маппинг товаров между магазинами | Маппинг по близости цены при инициализации (`seed_products`): каждый товар FakeStore цепляется к ближайшему по цене товару DummyJSON. 20 товаров получают цены из двух магазинов, остальные — только из DummyJSON. В production заменяется на fuzzy-matching по title. |
 | Частота опроса магазинов | Текущий выбор — каждые 4 часа. Нужно ли настраивать per-shop? |
 | Rate limiting внешних API | DummyJSON и FakeStore могут ограничивать запросы. Нужна retry-стратегия с exponential backoff. |
 | Email-провайдер | SMTP для dev, SendGrid / AWS SES для production — финальный выбор зависит от инфраструктуры. |
@@ -1084,15 +1096,15 @@ Celery Beat
          │
          └─► PriceFetcherService.fetch_all()
                │
-               └─► [для каждого Shop в БД, параллельно через asyncio.gather()]
+               └─► [для каждого Shop в БД, последовательно]
                      │
                      ├─► get_adapter(shop.adapter_key)
                      ├─► adapter.fetch_products()  ──► HTTP GET /products
                      │                                  (DummyJSON / FakeStore)
-                     └─► save_price(product_shop_id, price_usd)
+                     └─► add_price(product_shop_id, price_usd)
                            │
-                           ├─► INSERT INTO price_history ...
-                           └─► invalidate Redis cache (product_prices:{id}:*)
+                           ├─► дедуп: пропустить, если цена снята < 1 часа назад
+                           └─► INSERT INTO price_history ...
 ```
 
 ---

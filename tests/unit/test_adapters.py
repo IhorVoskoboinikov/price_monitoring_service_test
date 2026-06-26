@@ -1,5 +1,5 @@
-"""Юнит-тесты адаптеров магазинов: маппинг ответов в ShopProduct, пагинация
-DummyJSON и retry на 429. Сеть замокана фейковым httpx-клиентом."""
+"""Unit tests for shop adapters: mapping responses into ShopProduct, DummyJSON
+pagination, and retry on 429. The network is mocked with a fake httpx client."""
 
 from decimal import Decimal
 
@@ -25,7 +25,7 @@ class _FakeResponse:
 
 
 class _FakeClient:
-    """Контекст-менеджер вместо httpx.AsyncClient; get() делегирует в handler."""
+    """Context manager in place of httpx.AsyncClient; get() delegates to handler."""
 
     def __init__(self, handler, **_) -> None:
         self._handler = handler
@@ -60,7 +60,7 @@ async def test_fakestore_maps_fields(monkeypatch):
 
     assert [p.external_id for p in products] == ["1", "2"]
     assert products[0].title == "Backpack"
-    assert products[0].price_usd == Decimal("109.95")  # деньги — Decimal, не float
+    assert products[0].price_usd == Decimal("109.95")  # money is Decimal, not float
     assert isinstance(products[0].price_usd, Decimal)
     assert products[1].category == "clothes"
 
@@ -72,7 +72,7 @@ async def test_fakestore_retries_on_5xx(monkeypatch):
     def handler(url: str):
         calls["n"] += 1
         if calls["n"] == 1:
-            return _FakeResponse(None, status_code=503)  # первый раз — сервис лёг
+            return _FakeResponse(None, status_code=503)  # first time the service is down
         return _FakeResponse([
             {"id": 1, "title": "P", "price": 5.0, "description": "", "category": "c"},
         ])
@@ -86,7 +86,7 @@ async def test_fakestore_retries_on_5xx(monkeypatch):
 
 
 async def test_dummyjson_paginates(monkeypatch):
-    # total=150 при limit=100 → две страницы (skip=0 и skip=100).
+    # total=150 with limit=100 -> two pages (skip=0 and skip=100).
     def handler(url: str):
         skip = 100 if "skip=100" in url else 0
         count = 50 if skip == 100 else 100
@@ -115,7 +115,7 @@ async def test_dummyjson_retries_on_429(monkeypatch):
     def handler(url: str):
         calls["n"] += 1
         if calls["n"] == 1:
-            return _FakeResponse(None, status_code=429)  # первый раз — лимит
+            return _FakeResponse(None, status_code=429)  # first time the rate limit hits
         return _FakeResponse({
             "total": 1,
             "products": [{"id": 1, "title": "P", "price": 5.0,
@@ -126,7 +126,7 @@ async def test_dummyjson_retries_on_429(monkeypatch):
 
     products = await DummyJsonAdapter("https://dummyjson").fetch_products()
 
-    assert calls["n"] == 2  # один ретрай
+    assert calls["n"] == 2  # one retry
     assert len(products) == 1
 
 

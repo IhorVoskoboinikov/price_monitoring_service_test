@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 
 class UserProductService:
-    """Управление watchlist пользователя."""
+    """Manage the user's watchlist."""
 
     def __init__(
         self,
@@ -27,7 +27,7 @@ class UserProductService:
     async def list_tracked(
         self, user_id: uuid.UUID, currency: Currency = Currency.USD
     ) -> list[ProductDetail]:
-        # Один агрегирующий запрос на весь watchlist (без N+1 по товарам).
+        # One aggregate query for the whole watchlist (no N+1 over products).
         return await self.price_service.get_watchlist_details(user_id, currency)
 
     async def add(self, user_id: uuid.UUID, product_id: uuid.UUID) -> None:

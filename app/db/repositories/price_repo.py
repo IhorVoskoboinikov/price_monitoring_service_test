@@ -12,17 +12,17 @@ from app.db.repositories.base import BaseRepository
 
 
 def utc_today_start() -> datetime:
-    """Начало текущих UTC-суток — граница для выборок «на сегодня»."""
+    """Start of the current UTC day — the boundary for "today" queries."""
     return datetime.combine(date.today(), datetime.min.time()).replace(
         tzinfo=timezone.utc
     )
 
 
 def latest_price_subq(since: datetime | None = None) -> Subquery:
-    """Подзапрос: последняя цена (price_usd) для каждого product_shop_id.
+    """Subquery: the last price (price_usd) for each product_shop_id.
 
-    Если задан `since`, учитываются только записи не старее `since` — так
-    получаем цену «на сегодня» (ТЗ): магазин без записи за период выпадает.
+    If `since` is given, only records not older than `since` are used — this gives
+    the "today" price (from the spec): a shop with no record in the period drops out.
     """
     rn = func.row_number().over(
         partition_by=PriceHistory.product_shop_id,
@@ -49,12 +49,12 @@ def latest_price_subq(since: datetime | None = None) -> Subquery:
 
 
 class PriceRepo(BaseRepository):
-    """Доступ к таблице price_history."""
+    """Access to the price_history table."""
 
     async def get_current_prices(self, product_id: uuid.UUID) -> Sequence[Row]:
-        """Цена магазинов товара на сегодня: (shop_name, price_usd, recorded_at).
+        """Today's shop prices for a product: (shop_name, price_usd, recorded_at).
 
-        Магазины без записи за сегодня в выдачу не попадают (ТЗ: «цены на сегодня»).
+        Shops with no record for today are not returned (spec: "prices for today").
         """
         latest = latest_price_subq(utc_today_start())
         q = (
@@ -72,7 +72,7 @@ class PriceRepo(BaseRepository):
     async def get_history(
         self, product_id: uuid.UUID, dt_from: datetime, dt_to: datetime
     ) -> Sequence[Row]:
-        """Средняя дневная цена по магазинам: (shop_name, day, avg_price_usd)."""
+        """Average daily price per shop: (shop_name, day, avg_price_usd)."""
         q = (
             select(
                 Shop.name.label("shop_name"),
@@ -94,7 +94,7 @@ class PriceRepo(BaseRepository):
     async def avg_today_by_products(
         self, product_ids: Sequence[uuid.UUID]
     ) -> dict[uuid.UUID, Decimal]:
-        """Средняя цена за сегодня по каждому товару из списка."""
+        """Average price for today for each product in the list."""
         if not product_ids:
             return {}
         today_start = utc_today_start()
@@ -116,7 +116,7 @@ class PriceRepo(BaseRepository):
     async def avg_prev_30d_by_products(
         self, product_ids: Sequence[uuid.UUID]
     ) -> dict[uuid.UUID, Decimal]:
-        """Средняя цена за предыдущие 30 дней (до сегодня) по каждому товару."""
+        """Average price over the previous 30 days (up to today) for each product."""
         if not product_ids:
             return {}
         today_start = utc_today_start()
@@ -143,10 +143,10 @@ class PriceRepo(BaseRepository):
         )
 
     async def product_shop_ids_priced_since(self, since: datetime) -> set[int]:
-        """product_shop_id, у которых уже есть запись цены не старее `since`.
+        """product_shop_id values with a price record not older than `since`.
 
-        Используется для дедупликации: не пишем повторный снимок цены, если
-        он был сделан недавно (см. PriceFetcherService).
+        Used for deduplication: we do not write a repeated price snapshot if one
+        was taken recently (see PriceFetcherService).
         """
         rows = (
             await self.db.execute(

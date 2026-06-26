@@ -8,7 +8,7 @@ from app.services.shop_adapters.registry import get_adapter
 
 logger = get_logger(__name__)
 
-# Не пишем повторный снимок цены, если он уже сделан в пределах этого окна.
+# Do not write a repeated price snapshot if one was already made within this window.
 _DEDUP_WINDOW = timedelta(hours=1)
 
 
@@ -18,9 +18,9 @@ class PriceFetcherService:
         self.prices = prices
 
     async def fetch_all(self) -> dict[str, int]:
-        """Снимает текущие цены со всех активных магазинов.
+        """Take current prices from all active shops.
 
-        Возвращает {adapter_key: records_written}. Коммит — на стороне вызывающего.
+        Returns {adapter_key: records_written}. The commit is done by the caller.
         """
         with log_operation(logger, "fetch_all_prices"):
             shops = await self.shops.list_active()
@@ -56,7 +56,7 @@ class PriceFetcherService:
                 f"for adapter={shop.adapter_key}"
             )
 
-            # Дедуп: товары, для которых цена уже снята за последний час.
+            # Dedup: products whose price was already taken within the last hour.
             since = datetime.now(timezone.utc) - _DEDUP_WINDOW
             recently_priced = await self.prices.product_shop_ids_priced_since(since)
 
@@ -67,10 +67,10 @@ class PriceFetcherService:
                 ps = ps_by_external_id.get(product.external_id)
                 if ps is None:
                     skipped += 1
-                    continue  # товар ещё не смаплен в БД
+                    continue  # product is not mapped in the DB yet
                 if ps.id in recently_priced:
                     deduped += 1
-                    continue  # свежий снимок уже есть — не дублируем
+                    continue  # a fresh snapshot already exists — no duplicate
                 self.prices.add_price(ps.id, product.price_usd)
                 count += 1
 

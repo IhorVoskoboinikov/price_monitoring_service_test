@@ -8,7 +8,7 @@ from app.db.repositories.base import BaseRepository
 
 
 class ShopRepo(BaseRepository):
-    """Доступ к таблицам shops и product_shops."""
+    """Access to the shops and product_shops tables."""
 
     async def list_active(self) -> Sequence[Shop]:
         rows = (

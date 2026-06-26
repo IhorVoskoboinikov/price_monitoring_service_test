@@ -1,22 +1,22 @@
 FROM python:3.12-slim
 
-# Копируем UV из официального образа — не нужно устанавливать через pip
+# Copy UV from the official image — no need to install it via pip
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Копируем только файлы зависимостей — этот слой кешируется
-# и не пересобирается при изменении кода приложения
+# Copy only the dependency files — this layer is cached
+# and is not rebuilt when the app code changes
 COPY pyproject.toml uv.lock ./
 
-# --frozen     — строго из lock-файла, без обновлений
-# --no-dev     — только prod зависимости
-# --no-cache   — не хранить кеш в образе
+# --frozen     — strictly from the lock file, no updates
+# --no-dev     — prod dependencies only
+# --no-cache   — do not keep a cache in the image
 RUN uv sync --frozen --no-dev --no-cache
 
-# Добавляем venv в PATH — позволяет вызывать python/uvicorn/celery/alembic напрямую
+# Add the venv to PATH — lets you call python/uvicorn/celery/alembic directly
 ENV PATH="/app/.venv/bin:$PATH"
 
 COPY . .
 
-# Используется как базовый образ для api, worker, beat и migrate
+# Used as the base image for api, worker, beat, and migrate

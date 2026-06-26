@@ -10,7 +10,7 @@ from app.db.repositories.base import BaseRepository
 
 
 class ExchangeRateRepo(BaseRepository):
-    """Доступ к таблице exchange_rates."""
+    """Access to the exchange_rates table."""
 
     async def get_rate(self, currency: str, for_date: date) -> Decimal | None:
         return await self.db.scalar(
@@ -23,7 +23,7 @@ class ExchangeRateRepo(BaseRepository):
     async def get_rate_on_or_before(
         self, currency: str, for_date: date
     ) -> Decimal | None:
-        """Ближайший курс на дату ≤ for_date (fallback, когда точной даты нет)."""
+        """Nearest rate on a date <= for_date (fallback when no exact date)."""
         return await self.db.scalar(
             select(ExchangeRate.rate_uah_per_unit)
             .where(
@@ -45,7 +45,7 @@ class ExchangeRateRepo(BaseRepository):
     async def upsert(
         self, currency: str, for_date: date, rate: Decimal, source: str = "NBU"
     ) -> None:
-        """Идемпотентная запись курса по уникальному ключу (currency_code, date)."""
+        """Idempotent write of a rate by the unique key (currency_code, date)."""
         stmt = pg_insert(ExchangeRate).values(
             currency_code=currency,
             rate_uah_per_unit=rate,

@@ -42,7 +42,7 @@ alembic/versions/*.pyc
 celerybeat-schedule
 celerybeat.pid
 
-# AI assistants (Claude Code и т.п.) — локальные настройки и артефакты агента
+# AI assistants (Claude Code, etc.) — local settings and agent artifacts
 .claude/
 .cursor/
 .aider*

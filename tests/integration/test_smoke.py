@@ -1,4 +1,4 @@
-"""Smoke-тесты: проверяют, что тестовая инфраструктура поднимается корректно."""
+"""Smoke tests: check that the test infrastructure starts up correctly."""
 
 from jose import jwt
 from sqlalchemy import func, select
@@ -32,7 +32,7 @@ async def test_auth_client_ok(auth_client):
 
 
 async def test_token_without_user_id_rejected(client):
-    # Валидная подпись, но нет обязательного клейма user_id → TokenPayload не пройдёт
+    # Valid signature, but no required user_id claim -> TokenPayload will fail
     token = jwt.encode(
         {"sub": "admin", "role": "admin"}, settings.app_secret_key, algorithm="HS256"
     )

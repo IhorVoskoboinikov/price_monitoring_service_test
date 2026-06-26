@@ -1,12 +1,12 @@
 """
-On-demand загрузка исторических курсов валют с НБУ.
+On-demand load of historical currency rates from NBU.
 
-Usage (внутри контейнера api, проект смонтирован в /app):
+Usage (inside the api container, project mounted at /app):
     docker compose exec -e PYTHONPATH=/app api \
         python scripts/sync_historical_rates.py [DAYS]
 
-DAYS — сколько дней назад грузить (по умолчанию 30).
-Грузит по дням для USD/EUR/GBP, идемпотентно (уже имеющиеся даты пропускаются).
+DAYS — how many days back to load (default 30).
+Loads day by day for USD/EUR/GBP, idempotent (dates already present are skipped).
 """
 
 import asyncio
@@ -23,7 +23,7 @@ from app.services.db_service import db_service
 async def _run(days: int) -> int:
     today = date.today()
     date_from = today - timedelta(days=days)
-    async with db_service.create_session(readonly=False) as db:
+    async with db_service.session() as db:
         service = CurrencyService(ExchangeRateRepo(db), redis_client)
         written = await service.sync_historical_rates(date_from, today)
         await db.commit()

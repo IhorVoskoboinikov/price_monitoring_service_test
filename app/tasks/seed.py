@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,7 @@ from app.db.models.user import User
 from app.db.repositories.exchange_rate_repo import ExchangeRateRepo
 from app.services.currency_service import CurrencyService
 from app.services.db_service import db_service
+from app.services.shop_adapters.base import ShopProduct
 from app.services.shop_adapters.dummyjson import DummyJsonAdapter
 from app.services.shop_adapters.fakestore import FakeStoreAdapter
 
@@ -26,7 +28,7 @@ DEMO_USER_ID = uuid.UUID("10000000-0000-0000-0000-000000000001")
 
 
 async def seed_shops(db: AsyncSession) -> dict[str, int]:
-    """Создаёт записи магазинов. Возвращает {adapter_key: shop_id}."""
+    """Create shop records. Returns {adapter_key: shop_id}."""
     with log_operation(logger, "seed_shops"):
         shops = [
             Shop(name="DummyJSON", base_url=settings.dummyjson_url, adapter_key=DUMMYJSON_KEY, is_active=True),
@@ -35,7 +37,7 @@ async def seed_shops(db: AsyncSession) -> dict[str, int]:
         for shop in shops:
             db.add(shop)
 
-        await db.flush()  # получаем auto-increment id от БД
+        await db.flush()  # get the auto-increment id from the DB
         shop_ids = {s.adapter_key: s.id for s in shops}
         await db.commit()
 
@@ -43,11 +45,44 @@ async def seed_shops(db: AsyncSession) -> dict[str, int]:
         return shop_ids
 
 
+def _map_by_nearest_price(
+    dummy_products: list[ShopProduct],
+    fakestore_products: list[ShopProduct],
+) -> dict[int, ShopProduct]:
+    """Match each FakeStore product to the closest-priced DummyJSON product.
+
+    Returns {dummy_index: fakestore_product}. Each DummyJSON product is used at
+    most once (a 1:1 match), so the two shops of one logical product keep similar
+    prices. Greedy by the smallest price gap — good enough for a demo seed.
+    """
+    mapping: dict[int, ShopProduct] = {}
+    used: set[int] = set()
+    for fakestore in fakestore_products:
+        best_idx: int | None = None
+        best_gap: Decimal | None = None
+        for i, dummy in enumerate(dummy_products):
+            if i in used:
+                continue
+            gap = abs(dummy.price_usd - fakestore.price_usd)
+            if best_gap is None or gap < best_gap:
+                best_idx, best_gap = i, gap
+        if best_idx is None:
+            break  # no DummyJSON products left to match
+        used.add(best_idx)
+        mapping[best_idx] = fakestore
+    return mapping
+
+
 async def seed_products(db: AsyncSession, shop_ids: dict[str, int]) -> None:
     """
-    Загружает товары из DummyJSON и FakeStore.
-    Первые 20 товаров получают цены из обоих магазинов (маппинг по индексу).
-    Остальные ~174 — только из DummyJSON.
+    Load products from DummyJSON and FakeStore.
+
+    Every DummyJSON product becomes one logical product. Each FakeStore product
+    is then attached as a second shop to the DummyJSON product with the closest
+    price (see _map_by_nearest_price). This keeps the cross-shop pairs plausible
+    (both shops have a similar price for one product) instead of the old
+    map-by-index, which paired unrelated items with very different prices.
+    The other ~174 DummyJSON products stay single-shop.
     """
     dummyjson_id = shop_ids[DUMMYJSON_KEY]
     fakestore_id = shop_ids[FAKESTORE_KEY]
@@ -61,36 +96,38 @@ async def seed_products(db: AsyncSession, shop_ids: dict[str, int]) -> None:
         fakestore_products = await FakeStoreAdapter(settings.fakestore_url).fetch_products()
         logger.info(f"Fetched {len(fakestore_products)} products from FakeStore")
 
-        for i, dummy in enumerate(dummy_products):
-            # UUID генерируем явно — default=uuid.uuid4 в модели применяется только
-            # при INSERT (flush), а не при создании Python-объекта
+        # DummyJSON product (by index) -> the logical product UUID
+        product_ids: list[uuid.UUID] = []
+        for dummy in dummy_products:
+            # Generate the UUID here — default=uuid.uuid4 in the model runs only
+            # on INSERT (flush), not when the Python object is created
             product_id = uuid.uuid4()
-            product = Product(
+            product_ids.append(product_id)
+            db.add(Product(
                 id=product_id,
                 title=dummy.title,
                 description=dummy.description,
                 category=dummy.category,
                 description_source_shop_id=dummyjson_id,
-            )
-            db.add(product)
-
+            ))
             db.add(ProductShop(
                 product_id=product_id,
                 shop_id=dummyjson_id,
                 external_id=dummy.external_id,
             ))
 
-            if i < len(fakestore_products):
-                db.add(ProductShop(
-                    product_id=product_id,
-                    shop_id=fakestore_id,
-                    external_id=fakestore_products[i].external_id,
-                ))
+        mapped = _map_by_nearest_price(dummy_products, fakestore_products)
+        for dummy_idx, fakestore in mapped.items():
+            db.add(ProductShop(
+                product_id=product_ids[dummy_idx],
+                shop_id=fakestore_id,
+                external_id=fakestore.external_id,
+            ))
 
         await db.commit()
         logger.info(
             f"Seeded {len(dummy_products)} products | "
-            f"dummyjson={len(dummy_products)} fakestore_mapped={min(len(dummy_products), len(fakestore_products))}"
+            f"dummyjson={len(dummy_products)} fakestore_mapped={len(mapped)}"
         )
 
 
@@ -112,11 +149,11 @@ async def seed_demo_user(db: AsyncSession) -> None:
 
 
 async def run_seed_if_needed() -> None:
-    """Идемпотентный стартовый seed: demo-user, магазины, товары, курсы на сегодня.
+    """Idempotent startup seed: demo user, shops, products, today's rates.
 
-    Запускается из lifespan только в контейнере api (RUN_SEED_ON_STARTUP=true).
-    Каждый шаг проверяется независимо — устойчивость к частично выполненному seed.
-    Сбои внешних API не валят старт приложения (graceful degradation).
+    Runs from lifespan only in the api container (RUN_SEED_ON_STARTUP=true).
+    Each step is checked on its own — safe against a partly done seed.
+    External API failures do not break app startup (graceful degradation).
     """
     with log_operation(logger, "startup seed"):
         async with db_service.session() as db:
@@ -142,8 +179,8 @@ async def run_seed_if_needed() -> None:
             else:
                 logger.info(f"Products already exist ({products_count}), skipping")
 
-            # Курсы синхронизируем при каждом старте (идемпотентный upsert на сегодня),
-            # чтобы /currencies отдавал актуальное, не дожидаясь beat.
+            # Sync rates on every startup (idempotent upsert for today), so
+            # /currencies returns fresh data without waiting for beat.
             try:
                 currency_service = CurrencyService(ExchangeRateRepo(db), redis_client)
                 synced = await currency_service.sync_today_rates()

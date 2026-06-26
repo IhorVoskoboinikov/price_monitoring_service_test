@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 
 @app.task(name="tasks.check_price_alerts")
 def check_price_alerts_task() -> int:
-    """Проверяет активные алерты и шлёт email при падении цены ниже порога."""
+    """Check active alerts and send email when a price drops below the threshold."""
     logger.info("[TASK] check_price_alerts_task started")
     sent = asyncio.run(_check_alerts_async())
     logger.info(f"[TASK] check_price_alerts_task finished | sent={sent}")

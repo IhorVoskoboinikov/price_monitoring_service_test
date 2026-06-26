@@ -3,13 +3,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    # ── Приложение ──────────────────────────────────────────
+    # ── Application ─────────────────────────────────────────
     app_env: str = "dev"
     app_secret_key: str
     debug: bool = False
     run_seed_on_startup: bool = False
 
-    # ── База данных ─────────────────────────────────────────
+    # ── Database ────────────────────────────────────────────
     database_url: PostgresDsn
     db_pool_size: int = 10
     db_max_overflow: int = 20
@@ -28,8 +28,8 @@ class Settings(BaseSettings):
     sync_rates_cron_hour: int = 8
 
     # ── Email ───────────────────────────────────────────────
-    # email_enabled=false → console-режим: письма логируются, не отправляются.
-    # Проект запускается без реального SMTP; для доставки выставить EMAIL_ENABLED=true.
+    # email_enabled=false -> console mode: emails are logged, not sent.
+    # The project runs without real SMTP; to send emails set EMAIL_ENABLED=true.
     email_enabled: bool = False
     smtp_host: str = "localhost"
     smtp_port: int = 587
@@ -38,11 +38,11 @@ class Settings(BaseSettings):
     smtp_from: str = "noreply@pricetracker.com"
     smtp_use_tls: bool = True
 
-    # ── НБУ API ─────────────────────────────────────────────
+    # ── NBU API (Ukraine central bank) ──────────────────────
     nbu_api_url: str = "https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange"
     nbu_historical_years: int = 5
 
-    # ── Внешние API магазинов ────────────────────────────────
+    # ── External shop APIs ──────────────────────────────────
     dummyjson_url: str = "https://dummyjson.com"
     fakestore_url: str = "https://fakestoreapi.com"
     shop_api_timeout: int = 10
@@ -52,7 +52,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore",  # игнорировать инфра-переменные (POSTGRES_*, PGADMIN_*)
+        extra="ignore",  # ignore infra vars (POSTGRES_*, PGADMIN_*)
     )
 
 

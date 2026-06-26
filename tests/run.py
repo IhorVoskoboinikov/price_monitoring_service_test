@@ -1,23 +1,23 @@
 """
-Запуск тестов с покрытием.
+Run the tests with coverage.
 
-Usage (из корня проекта):
-    uv run python tests/run.py               # все тесты + coverage
-    uv run python tests/run.py unit          # только unit — БЕЗ Docker, доли секунды
-    uv run python tests/run.py integration   # только integration (testcontainers)
-    uv run python tests/run.py -k alerts     # доп. аргументы пробрасываются в pytest
+Usage (from the project root):
+    uv run python tests/run.py               # all tests + coverage
+    uv run python tests/run.py unit          # unit only — NO Docker, sub-second
+    uv run python tests/run.py integration   # integration only (testcontainers)
+    uv run python tests/run.py -k alerts     # extra args are passed to pytest
 
-Отчёт о покрытии: в терминале (term-missing) и HTML в tests/htmlcov/index.html.
+Coverage report: in the terminal (term-missing) and HTML in tests/htmlcov/index.html.
 
-Раскладка: tests/unit — чистые тесты без БД/сети (Docker не нужен);
-tests/integration — поднимают Postgres через testcontainers.
+Layout: tests/unit — pure tests with no DB/network (no Docker needed);
+tests/integration — start Postgres via testcontainers.
 """
 
 import sys
 
 import pytest
 
-# Пресеты выбора набора → каталог. Всё остальное считаем аргументами pytest.
+# Suite presets -> directory. Everything else is treated as pytest args.
 SUITES = {"unit": "tests/unit", "integration": "tests/integration"}
 
 COV_ARGS = [

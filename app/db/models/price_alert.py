@@ -36,12 +36,12 @@ class PriceAlert(Base):
     )
 
     __table_args__ = (
-        # Список алертов юзера: WHERE user_id ORDER BY created_at DESC.
-        # Композит закрывает и фильтр, и сортировку.
+        # User's alert list: WHERE user_id ORDER BY created_at DESC.
+        # The composite index covers both the filter and the sort.
         Index("ix_price_alert_user_created", "user_id", desc("created_at")),
-        # Проверка срабатывания смотрит только активные. После срабатывания
-        # алерт деактивируется → таблица со временем в основном «мёртвая».
-        # Partial-индекс по живым строкам меньше и быстрее полного.
+        # The trigger check looks only at active alerts. After firing, an alert
+        # is set inactive -> over time most rows in the table are "dead".
+        # A partial index over live rows is smaller and faster than a full one.
         Index(
             "ix_price_alert_active",
             "product_id",

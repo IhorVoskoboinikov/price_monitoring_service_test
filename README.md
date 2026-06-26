@@ -1,175 +1,207 @@
 # Price Tracker Service
 
-Backend-сервис на FastAPI для отслеживания динамики цен на товары из нескольких
-магазинов (DummyJSON, FakeStore), с историей цен, конвертацией валют по курсам НБУ
-и email-уведомлениями при падении цены ниже порога.
+A FastAPI backend service for tracking product price changes across several
+shops (DummyJSON, FakeStore), with price history, currency conversion using NBU
+rates, and email alerts when a price drops below a threshold.
 
-Тестовое задание (Middle+ / Senior Python Developer). Подробное архитектурное
-описание — в [`price_tracker_architecture.md`](price_tracker_architecture.md).
+Test assignment (Middle+ / Senior Python Developer). A detailed architecture
+description is in [`price_tracker_architecture.md`](price_tracker_architecture.md).
 
-## Возможности
+## Features
 
-- Список отслеживаемых товаров с диапазоном цен и трендом (рост/падение/без
-  изменений vs средняя за 30 дней), сортировка по цене и тренду.
-- Карточка товара: описание, диапазон цен, число магазинов.
-- Все цены по магазинам на сегодня и история цен по дням (серия на каждый
-  магазин + средняя), с конвертацией каждой точки по курсу её даты.
-- Watchlist пользователя (добавить/удалить/список).
-- Алерты: email при снижении цены ниже указанного порога (порог в любой валюте,
-  хранится в USD).
-- Выбор валюты (`USD`/`UAH`/`EUR`/`GBP`) везде, где возвращаются цены.
+- List of watched products with a price range and a trend (up/down/same vs the
+  30-day average), sorted by price and by trend.
+- Catalog browse (all products, paginated) to discover a `product_id` to track.
+- Product card: description, price range, number of shops.
+- All shop prices for today and a daily price history (one series per shop +
+  the average), with each point converted using the rate of its own date.
+- User watchlist (add/remove/list).
+- Alerts: email when a price drops below a given threshold (threshold in any
+  currency, stored in USD).
+- Currency choice (`USD`/`UAH`/`EUR`/`GBP`) everywhere prices are returned.
 
-## Технологии
+## Tech stack
 
 Python 3.12 · FastAPI · SQLAlchemy 2 (async) + Alembic · PostgreSQL 16
-(партиционирование истории цен) · Redis (кеш курсов) · Celery + Beat · httpx ·
+(partitioned price history) · Redis (rate cache) · Celery + Beat · httpx ·
 Pydantic v2 · uv · Docker Compose.
 
-## Архитектура (кратко)
+## Architecture (short)
 
 ```
-API (FastAPI)  ->  Services (бизнес-логика)  ->  Repositories  ->  PostgreSQL
-                     CurrencyService  ->  Redis / НБУ API
+API (FastAPI)  ->  Services (business logic)  ->  Repositories  ->  PostgreSQL
+                     CurrencyService  ->  Redis / NBU API
                      ShopAdapters     ->  DummyJSON / FakeStore
-Celery Beat  ->  задачи (сбор цен, проверка алертов, синхр. курсов, партиции)
+Celery Beat  ->  tasks (collect prices, check alerts, sync rates, partitions)
 ```
 
-- **Repository-per-entity + DI**: эндпоинты получают сервисы через
-  `Depends` (`app/api/deps.py`), сервисы — репозитории. Транзакция на запрос
-  открывается в `_get_db` (commit при успехе, rollback при ошибке).
-- **Адаптеры магазинов** изолированы за `BaseShopAdapter`; новый магазин — это
-  новый класс + строка в реестре, бизнес-логика не меняется.
-- **Цены хранятся только в USD**; конвертация — на лету через `ExchangeRate`
-  (гривна как опорная валюта).
+- **Repository-per-entity + DI**: endpoints get services through `Depends`
+  (`app/api/deps.py`), services get repositories. The per-request transaction is
+  opened in `_get_db` (commit on success, rollback on error).
+- **Shop adapters** are isolated behind `BaseShopAdapter`; a new shop is a new
+  class + one line in the registry, and the business logic does not change.
+- **Prices are stored only in USD**; conversion happens on the fly through
+  `ExchangeRate` (the hryvnia is the base currency).
 
-## Быстрый старт (Docker Compose)
+## Quick start (Docker Compose)
 
 ```bash
-# 1. Конфиг (единственный обязательный шаг)
+# 1. Config (the only required step)
 cp .env.example .env
-# отредактируйте .env: как минимум APP_SECRET_KEY.
-# Для реальной отправки писем — EMAIL_ENABLED=true и рабочие SMTP_* (см. ниже).
+# edit .env: at least APP_SECRET_KEY.
+# For real email delivery — EMAIL_ENABLED=true and working SMTP_* (see below).
 
-# 2. Поднять весь стек одной командой
+# 2. Bring up the whole stack with one command
 docker compose up -d --build
 
-# 3. Наблюдать старт и автоматический seed
+# 3. Watch the startup and the automatic seed
 docker compose logs -f api
 ```
 
-`docker compose` сам выстраивает порядок: `postgres`/`redis` (healthcheck) →
-`migrate` (`alembic upgrade head`, ждём успешного завершения через
+`docker compose` builds the order by itself: `postgres`/`redis` (healthcheck) →
+`migrate` (`alembic upgrade head`, we wait for a clean finish via
 `depends_on: condition: service_completed_successfully`) → `api`/`worker` →
-`beat`. Отдельно поднимать инфраструктуру и гонять миграции не нужно.
+`beat`. You do not need to bring up the infrastructure and run migrations
+separately.
 
 API: <http://localhost:8000>, Swagger: <http://localhost:8000/docs>.
 
-> При старте `api` через FastAPI lifespan наполняет БД (магазины, товары из обоих
-> API, сегодняшние курсы). Шаги идемпотентны: магазины/товары создаются один раз,
-> курсы синхронизируются на каждом старте.
+> On startup `api` fills the DB through the FastAPI lifespan (shops, products
+> from both APIs, today's rates). The steps are idempotent: shops/products are
+> created once, rates are synced on every start.
 >
-> Миграции можно при желании запускать отдельно (например, в CI):
+> You can also run migrations on their own if you want (for example, in CI):
 > `docker compose run --rm migrate`.
 
-## Авторизация
+## Authorization
 
-Все эндпоинты требуют Bearer JWT (статический токен — полноценный auth вне ТЗ).
-Сгенерировать токен демо-пользователя:
+All endpoints require a Bearer JWT (a static token — full auth is outside the
+scope). Generate a token for the demo user:
 
 ```bash
 uv run python scripts/generate_token.py
 # Bearer eyJhbGciOiJIUzI1NiI...
 ```
 
-Вставьте его в Swagger («Authorize») или в заголовок:
+Paste it into Swagger ("Authorize") or into the header:
 
 ```bash
 curl -H "Authorization: Bearer <token>" http://localhost:8000/api/v1/products
 ```
 
-## Основные эндпоинты
+## Main endpoints
 
-| Метод + URL | Назначение |
+| Method + URL | Purpose |
 |---|---|
-| `GET /api/v1/products?currency=&sort=` | Список отслеживаемых товаров с трендом |
-| `GET /api/v1/products/{id}?currency=` | Карточка товара |
-| `GET /api/v1/products/{id}/prices` | Цены по магазинам на сегодня |
-| `GET /api/v1/products/{id}/price-history` | История цен (серии + средняя) |
+| `GET /api/v1/catalog?currency=&page=&page_size=` | Browse the whole catalog (find a `product_id` to track) |
+| `GET /api/v1/products?currency=&sort=` | List of watched products with a trend |
+| `GET /api/v1/products/{id}?currency=` | Product card |
+| `GET /api/v1/products/{id}/prices` | Shop prices for today |
+| `GET /api/v1/products/{id}/price-history` | Price history (series + average) |
 | `GET/POST /api/v1/me/products` · `DELETE /api/v1/me/products/{id}` | Watchlist |
-| `GET/POST /api/v1/me/alerts` · `DELETE /api/v1/me/alerts/{id}` | Алерты |
-| `GET /api/v1/currencies` | Текущие курсы валют |
-| `GET /api/v1/health` | Health-check |
+| `GET/POST /api/v1/me/alerts` · `DELETE /api/v1/me/alerts/{id}` | Alerts |
+| `GET /api/v1/currencies` | Current currency rates |
+| `GET /api/v1/health` | Health check |
 
-## Email-уведомления
+## Email notifications
 
-По умолчанию `EMAIL_ENABLED=false` — **console-режим**: письма не отправляются,
-а логируются (удобно для разработки и проверки логики алертов). Для реальной
-доставки задайте `EMAIL_ENABLED=true` и рабочие `SMTP_*` в `.env`
-(Gmail App Password или Mailtrap — см. комментарии в `.env.example`).
+By default `EMAIL_ENABLED=false` — **console mode**: emails are not sent, they
+are logged (handy for development and for checking the alert logic). For real
+delivery set `EMAIL_ENABLED=true` and working `SMTP_*` in `.env` (a Gmail App
+Password or Mailtrap — see the comments in `.env.example`).
 
-## Курсы валют
+## Currency rates
 
-Источник — официальное API НБУ (бесплатное, без ключа). `get_rate` идёт по
-цепочке Redis → PostgreSQL → НБУ (on-demand с записью в БД) → ближайший
-предыдущий курс (fallback). Сегодняшние курсы синхронизируются Celery-задачей;
-исторические можно догрузить вручную:
-
-```bash
-uv run python scripts/sync_historical_rates.py 30   # за последние 30 дней
-```
-
-## Тесты
-
-Набор разделён по уровням пирамиды:
-
-- **`tests/unit/`** — чистая логика (тренд, сортировки, ретраи, парсинг
-  адаптеров с мок-`httpx`). Ни БД, ни сети — **Docker не нужен**, гоняются за
-  доли секунды. То, что запускают на каждый коммит в CI.
-- **`tests/integration/`** — API-ручки и сервисы на реальном PostgreSQL в Docker
-  через `testcontainers` (тот же диалект, что в проде — честно проверяются UUID,
-  on-conflict upsert, оконные функции и партиционирование). Redis замокан
-  `fakeredis`, внешние API (НБУ, магазины) — фейковым httpx-клиентом.
-
-Тяжёлые фикстуры (контейнер, наполнение БД) живут в
-`tests/integration/conftest.py`, поэтому unit-набор их не подхватывает.
+The source is the official NBU API (free, no key). `get_rate` follows the chain
+Redis → PostgreSQL → NBU (on-demand, with a write to the DB) → nearest earlier
+rate (fallback). Today's rates are synced by a Celery task; historical ones can
+be loaded by hand:
 
 ```bash
-uv run python tests/run.py              # весь набор + отчёт покрытия
-uv run python tests/run.py unit         # только unit — без Docker, мгновенно
-uv run python tests/run.py integration  # только integration (testcontainers)
-uv run python tests/run.py -k alert     # фильтр по имени
+uv run python scripts/sync_historical_rates.py 30   # for the last 30 days
 ```
 
-`tests/run.py` запускает pytest с покрытием (term + HTML в `tests/htmlcov`).
-Для `integration`/полного набора нужен запущенный Docker.
+## Tests
 
-## Локальная разработка
+The suite is split by the levels of the test pyramid:
+
+- **`tests/unit/`** — pure logic (trend, sorting, retries, adapter parsing with a
+  mock `httpx`). No DB, no network — **no Docker needed**, runs in a fraction of
+  a second. The kind you run on every commit in CI.
+- **`tests/integration/`** — API endpoints and services on a real PostgreSQL in
+  Docker via `testcontainers` (the same dialect as in prod — UUID, on-conflict
+  upsert, window functions, and partitioning are tested for real). Redis is
+  mocked with `fakeredis`, and external APIs (NBU, shops) with a fake httpx
+  client.
+
+The heavy fixtures (container, DB seeding) live in
+`tests/integration/conftest.py`, so the unit suite does not pick them up.
 
 ```bash
-uv sync                      # установить зависимости (включая dev)
-uv run ruff check app/       # линт
-uv run alembic upgrade head  # миграции
+uv run python tests/run.py              # whole suite + coverage report
+uv run python tests/run.py unit         # unit only — no Docker, instant
+uv run python tests/run.py integration  # integration only (testcontainers)
+uv run python tests/run.py -k alert     # filter by name
 ```
 
-## Конфигурация
+`tests/run.py` runs pytest with coverage (term + HTML in `tests/htmlcov`).
+For `integration`/the full suite you need a running Docker.
 
-Все настройки — в `.env` (читаются через `pydantic-settings`, валидация при
-старте). Шаблон со всеми переменными и комментариями — в `.env.example`.
-Реальный `.env` в `.gitignore` и в репозиторий не попадает.
+## Local development
 
-## Заметки по решениям
+```bash
+uv sync                      # install dependencies (including dev)
+uv run ruff check app/       # lint
+```
 
-- **Маппинг товаров между магазинами** — по индексу при seed (первые ~20 товаров
-  получают цены из двух магазинов). В production заменяется на fuzzy-matching без
-  изменения схемы БД.
-- **Дедуп цен** — повторный снимок цены товара в пределах 1 часа не пишется.
-- **Историческая загрузка курсов за 5 лет** — вынесена в скрипт
-  (`sync_historical_rates.py`), чтобы не задерживать старт; при необходимости
-  легко перевести в фоновую задачу первого запуска.
+### Migrations
 
-## Процесс разработки
+In normal use you do **not** run migrations by hand: the `migrate` container
+runs `alembic upgrade head` automatically on every `docker compose up` (the
+`api`/`worker` wait for it via `service_completed_successfully`). So a fresh
+`docker compose up -d --build` already brings the schema to the latest revision.
 
-Работа велась по GitFlow: `main` — релизная ветка (старт — initial commit),
-весь прогресс шёл в `develop` и вливался в `main` через Pull Request с ревью
-(`develop → main`). Так история наглядно отражает поэтапную разработку, а не
-один «свалочный» коммит.
+To run Alembic **locally** (from your venv, e.g. to create a new migration),
+there is one catch: `.env` points `DATABASE_URL` at the `@postgres` host, which
+only resolves inside the Docker network. From the host you must point it at
+`@localhost:5432` (the port is published in docker-compose). Don't edit `.env`
+for this — the containers need `@postgres`; just override the variable for the
+command:
+
+```bash
+# the postgres container must be running: docker compose up -d postgres
+export LOCAL_DB='postgresql+asyncpg://postgres:postgres@localhost:5432/price_tracker'
+
+DATABASE_URL=$LOCAL_DB uv run alembic upgrade head                    # apply migrations
+DATABASE_URL=$LOCAL_DB uv run alembic current                        # show current revision
+DATABASE_URL=$LOCAL_DB uv run alembic revision --autogenerate -m "…" # create a new migration
+```
+
+If you see `Temporary failure in name resolution`, it means `DATABASE_URL`
+still points at `@postgres` — use the `@localhost` override above.
+
+## Configuration
+
+All settings are in `.env` (read through `pydantic-settings`, validated at
+startup). A template with all variables and comments is in `.env.example`. The
+real `.env` is in `.gitignore` and does not get into the repository.
+
+## Notes on decisions
+
+- **Mapping products between shops** — at seed time each FakeStore product is
+  attached as a second shop to the closest-priced DummyJSON product (so the ~20
+  two-shop products keep realistic price ranges, not random pairs). The
+  catalogs barely overlap, so this is a demo mapping; in production it is
+  replaced by fuzzy-matching by title without changing the DB schema.
+- **Price dedup** — a repeated price snapshot for a product within 1 hour is not
+  written.
+- **Historical 5-year rate load** — moved to a script
+  (`sync_historical_rates.py`) so it does not delay startup; if needed it is easy
+  to turn into a background task on first run.
+
+## Development process
+
+The work followed GitFlow: `main` is the release branch (starting from the
+initial commit), all progress went into `develop` and was merged into `main`
+through a reviewed Pull Request (`develop → main`). This way the history clearly
+shows step-by-step development, not one big "dump" commit.

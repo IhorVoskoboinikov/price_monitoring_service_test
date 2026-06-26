@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 @app.task(name="tasks.sync_exchange_rates")
 def sync_exchange_rates_task() -> int:
-    """Ежедневно загружает текущие курсы валют с НБУ в БД."""
+    """Load current currency rates from NBU into the DB every day."""
     logger.info("[TASK] sync_exchange_rates_task started")
     synced = asyncio.run(_sync_today_async())
     logger.info(f"[TASK] sync_exchange_rates_task finished | synced={synced}")

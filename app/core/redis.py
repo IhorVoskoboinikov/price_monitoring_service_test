@@ -4,12 +4,12 @@ from app.core.config import settings
 
 
 def create_redis_client() -> aioredis.Redis:
-    """Новый Redis-клиент. Для Celery-задач (asyncio.run создаёт новый event loop
-    на каждый вызов) нужен клиент, привязанный к текущему loop'у, — его создают
-    этим хелпером и закрывают после задачи."""
+    """New Redis client. Celery tasks use asyncio.run, which makes a new event loop
+    on each call, so they need a client bound to the current loop: create it with
+    this helper and close it after the task."""
     return aioredis.Redis.from_url(str(settings.redis_url), decode_responses=True)
 
 
-# Единый Redis-клиент приложения (FastAPI работает в одном event loop). Пул
-# соединений внутри клиента переиспользуется, поэтому держим его синглтоном.
+# One shared Redis client for the app (FastAPI runs in a single event loop). The
+# connection pool inside the client is reused, so we keep it as a singleton.
 redis_client: aioredis.Redis = create_redis_client()
